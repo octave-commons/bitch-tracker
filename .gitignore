@@ -1,0 +1,8 @@
+/.shadow-cljs/
+/.clj-kondo/.cache/
+/.cpcache/
+/.calva/
+/build/
+/dist/
+/node_modules/
+*.log

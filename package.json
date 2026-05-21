@@ -1,0 +1,25 @@
+{
+  "name": "@octave-commons/bitch-tracker",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shadow-CLJS BetterDiscord plugin scaffold for Discord moderation/event tracking.",
+  "license": "GPL-3.0-or-later",
+  "type": "commonjs",
+  "scripts": {
+    "clean": "rm -rf build dist .shadow-cljs",
+    "build:cljs": "pnpm dlx shadow-cljs@3.4.11 release plugin",
+    "bundle": "node scripts/write-bd-plugin.mjs",
+    "build": "pnpm run build:cljs && pnpm run bundle && pnpm run verify",
+    "lint:clj": "clj-kondo --lint src test",
+    "lint": "pnpm run lint:clj",
+    "test:cljs": "pnpm dlx shadow-cljs@3.4.11 compile test",
+    "verify": "node scripts/verify-bd-export.mjs",
+    "test": "pnpm run lint:clj && pnpm run test:cljs && pnpm run build"
+  },
+  "devDependencies": {
+    "shadow-cljs": "3.4.11"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

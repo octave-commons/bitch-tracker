@@ -1,0 +1,18 @@
+{:source-paths
+ ["src" "test"]
+
+ :builds
+ {:plugin
+  {:target :node-script
+   :main bitch-tracker.plugin/main!
+   :output-to "build/BitchTracker.raw.js"
+   :compiler-options
+   {:infer-externs :auto}}
+
+  :test
+  {:target :node-test
+   :output-to "build/node-tests.js"
+   :ns-regexp "-test$"
+   :autorun true
+   :compiler-options
+   {:infer-externs :auto}}}}
