@@ -1,6 +1,6 @@
 # BitchTracker BetterDiscord Plugin
 
-Shadow-CLJS scaffold for a BetterDiscord plugin, with `pseudo/` kept as the reference-design archive.
+Shadow-CLJS BetterDiscord plugin for OpenPlanner Discord ingestion, reaction labeling, semantic watch alerts, and review backfill. `pseudo/` is retained as the reference-design archive that this source integrates.
 
 ## Rule zero
 
@@ -10,13 +10,16 @@ The distributable plugin must stay in BetterDiscord's CommonJS meta-factory shap
 /**
  * @name BitchTracker
  * @author open-hax
- * @description Shadow-CLJS BetterDiscord plugin scaffold for Discord moderation/event tracking.
+ * @description Shadow-CLJS BetterDiscord plugin for OpenPlanner Discord ingestion, reaction labeling, and review backfill.
  * @version 0.0.1
  */
 
 module.exports = meta => ({
   start: () => {},
   stop: () => {},
+  getSettingsPanel: () => HTMLElement,
+  runBackfill: () => Promise,
+  flush: () => Promise,
 });
 ```
 
@@ -24,8 +27,8 @@ The ClojureScript entrypoint enforces that shape by assigning `module.exports` t
 
 ## Source layout
 
-- `src/bitch_tracker/plugin.cljs` — BetterDiscord plugin factory and lifecycle.
-- `test/bitch_tracker/plugin_test.cljs` — `cljs.test` coverage, including `deftest ^:async` and `await`.
+- `src/bitch_tracker/plugin.cljs` — BetterDiscord plugin factory, Discord dispatcher subscriptions, OpenPlanner event queue/flush, reaction labels, semantic scan, bot-token protected sends, settings UI, and backfill runner.
+- `test/bitch_tracker/plugin_test.cljs` — `cljs.test` coverage for the factory lifecycle and OpenPlanner event builders, including `deftest ^:async` and `await`.
 - `shadow-cljs.edn` — plugin and Node test builds.
 - `scripts/write-bd-plugin.mjs` — prepends BetterDiscord metadata to the compiled bundle.
 - `scripts/verify-bd-export.mjs` — validates the final `module.exports = meta => plugin` contract.
