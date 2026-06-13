@@ -1,6 +1,6 @@
 # BitchTracker BetterDiscord Plugin
 
-Shadow-CLJS BetterDiscord plugin for OpenPlanner Discord ingestion, reaction labeling, semantic watch alerts, and review backfill. `pseudo/` is retained as the reference-design archive that this source integrates.
+Shadow-CLJS BetterDiscord plugin for OpenPlanner Discord ingestion, reaction labeling, semantic watch alerts, and review backfill. `pseudo/` is retained as the reference-design archive that this source integrates. Current source-vs-pseudo parity status is tracked in `docs/parity/src-pseudo-parity.md`.
 
 ## Rule zero
 

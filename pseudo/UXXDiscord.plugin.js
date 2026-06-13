@@ -11,7 +11,12 @@
 //  BetterDiscord meta (BD reads the JSDoc block above)
 // ─────────────────────────────────────────────────────────────
 
-const UXX_LOCAL_URL = 'file:///home/err/devel/node_modules/.pnpm/node_modules/@open-hax/uxx/dist/tokens/src/index.js';
+const UXX_LOCAL_URLS = [
+  // Prefer the workspace package build: it is the live npm package source in this checkout.
+  'file:///home/err/devel/orgs/open-hax/uxx/dist/tokens/src/index.js',
+  // Fallback to the root workspace symlink/install when present.
+  'file:///home/err/devel/node_modules/.pnpm/node_modules/@open-hax/uxx/dist/tokens/src/index.js',
+];
 const UXX_CDN = 'https://esm.sh/@open-hax/uxx@latest/tokens';
 
 // ─────────────────────────────────────────────────────────────
@@ -370,12 +375,17 @@ module.exports = class UXXDiscord {
 
   // ── Helpers ────────────────────────────────────────────────
   async _loadUxxTokens() {
-    try {
-      return await import(UXX_LOCAL_URL);
-    } catch (localErr) {
-      console.warn('[UXX Discord] Local token import failed; falling back to CDN:', localErr);
-      return await import(UXX_CDN);
+    const errors = [];
+    for (const url of UXX_LOCAL_URLS) {
+      try {
+        return await import(url);
+      } catch (err) {
+        errors.push([url, err]);
+      }
     }
+
+    console.warn('[UXX Discord] Local @open-hax/uxx token imports failed; falling back to CDN:', errors);
+    return await import(UXX_CDN);
   }
 
   _getSavedTheme() {

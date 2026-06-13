@@ -483,6 +483,19 @@
                     (send-similar-to-watch! state user-id message similar))))))
    delay-ms))
 
+(defn- add-user-note! [user-id note]
+  (try
+    (let [webpack (bd-webpack)
+          actions (when-let [get-module (jget webpack "getModule")]
+                    (.call get-module webpack (fn [m] (or (jget m "addNote") (jget m "updateNote"))) #js {:searchExports true}))]
+      (cond
+        (jget actions "addNote") (do (jcall actions "addNote" user-id note) true)
+        (jget actions "updateNote") (do (jcall actions "updateNote" user-id note) true)
+        :else (do (log! "warn" nil "Could not find Discord user note action") false)))
+    (catch :default err
+      (log! "warn" nil "Failed to add Discord user note" err)
+      false)))
+
 (defn- handle-label-reaction! [state message-id channel-id _reactor-user-id]
   (let [message (jcall (state-get state "messageStore") "getMessage" channel-id message-id)]
     (if-not message
@@ -502,6 +515,7 @@
               (send-to-tracker! state message (channel-for state channel-id) nil "poodle-labeled")
               (when (and (>= next-count label-threshold) (< current label-threshold))
                 (send-to-watch! state aid message nil)
+                (add-user-note! aid "moderation-watch")
                 (toast! (str "User tagged for moderation watch: " aid) "warning"))
               (.add (state-get state "pendingSemanticQueries") message-id)
               (when (present-string? (jget message "content"))
@@ -673,22 +687,81 @@
             (recur (conj chunks (subs rest 0 split-at))
                    (str/replace (subs rest split-at) #"^\n+" ""))))))))
 
+(defn ^:async response-text [res]
+  (try
+    (if (jget res "text")
+      (await (jcall res "text"))
+      "")
+    (catch :default _err "")))
+
+(defn bot-retry-after-ms [res body-text]
+  (let [header-value (jcall (jget res "headers") "get" "retry-after")
+        header-seconds (js/Number header-value)]
+    (cond
+      (and (js/Number.isFinite header-seconds) (> header-seconds 0))
+      (min 10000 (js/Math.ceil (* header-seconds 1000)))
+
+      :else
+      (try
+        (let [retry-after (js/Number (jget (parse-json body-text #js {}) "retry_after"))]
+          (if (and (js/Number.isFinite retry-after) (> retry-after 0))
+            (min 10000 (js/Math.ceil (* retry-after 1000)))
+            0))
+        (catch :default _err 0)))))
+
+(defn redact-token [text token]
+  (let [value (str text)
+        secret (str token)]
+    (if (str/blank? secret)
+      value
+      (str/replace value secret "<bot-token>"))))
+
+(defn ^:async send-bot-request-with-retries! [fetch-impl url request token label sleep-fn attempt max-attempts]
+  (try
+    (let [res (await (.call fetch-impl nil url request))]
+      (if (jget res "ok")
+        true
+        (let [status (or (jget res "status") 0)
+              text (await (response-text res))
+              retry-ms (bot-retry-after-ms res text)]
+          (cond
+            (and (= status 429) (> retry-ms 0) (< attempt max-attempts))
+            (do
+              (log! "warn" nil (str "[" label "] bot send rate limited; retrying in " retry-ms "ms"))
+              (await (sleep-fn retry-ms))
+              (await (send-bot-request-with-retries! fetch-impl url request token label sleep-fn (inc attempt) max-attempts)))
+
+            (and (>= status 500) (< attempt max-attempts))
+            (let [delay-ms (* 500 attempt)]
+              (log! "warn" nil (str "[" label "] bot send HTTP " status "; retrying in " delay-ms "ms"))
+              (await (sleep-fn delay-ms))
+              (await (send-bot-request-with-retries! fetch-impl url request token label sleep-fn (inc attempt) max-attempts)))
+
+            :else
+            (do
+              (log! "warn" nil (str "[" label "] bot send failed HTTP " status ": " (subs (redact-token text token) 0 (min 500 (count (str text))))))
+              false)))))
+    (catch :default err
+      (if (< attempt max-attempts)
+        (let [delay-ms (* 500 attempt)]
+          (log! "warn" nil (str "[" label "] bot send attempt failed; retrying in " delay-ms "ms") err)
+          (await (sleep-fn delay-ms))
+          (await (send-bot-request-with-retries! fetch-impl url request token label sleep-fn (inc attempt) max-attempts)))
+        (do
+          (log! "warn" nil (str "[" label "] bot send failed") err)
+          false)))))
+
 (defn ^:async send-via-bot-token! [channel-id body label]
   (let [config (bot-config)]
     (if-not (jget config "token")
       (do (log! "warn" nil (str "[" label "] bot.json missing or invalid; protected send skipped")) false)
-      (let [fetch-impl (or (jget (bd-api) "Net" "fetch") js/fetch)
+      (let [token (jget config "token")
+            fetch-impl (or (jget (bd-api) "Net" "fetch") js/fetch)
             url (str "https://discord.com/api/v10/channels/" channel-id "/messages")
-            headers #js {:Authorization (bot-auth-header (jget config "token"))
-                         :Content-Type "application/json"}]
-        (try
-          (let [res (await (.call fetch-impl nil url #js {:method "POST" :headers headers :body (js/JSON.stringify body)}))]
-            (if (jget res "ok")
-              true
-              (do (log! "warn" nil (str "[" label "] bot send failed HTTP " (jget res "status"))) false)))
-          (catch :default err
-            (log! "warn" nil (str "[" label "] bot send failed") err)
-            false))))))
+            headers #js {:Authorization (bot-auth-header token)
+                         :Content-Type "application/json"}
+            request #js {:method "POST" :headers headers :body (js/JSON.stringify body)}]
+        (send-bot-request-with-retries! fetch-impl url request token label sleep-ms 1 3)))))
 
 (defn ^:async send-via-discord-http! [channel-id body label]
   (let [bd (bd-api)
@@ -730,20 +803,30 @@
           (log! "warn" nil (str "[" label "] fetch send failed") err)
           false)))))
 
+(defn ^:async send-message-action-attempts! [attempts label]
+  (if-let [attempt (first attempts)]
+    (try
+      (await (attempt))
+      true
+      (catch :default err
+        (log! "warn" nil (str "[" label "] MessageActions attempt failed") err)
+        (await (send-message-action-attempts! (rest attempts) label))))
+    false))
+
 (defn ^:async send-via-message-actions! [channel-id body label]
   (let [bd (bd-api)
         webpack (bd-webpack)
         actions (or (jcall bd "findModuleByProps" "sendMessage" "editMessage" "deleteMessage")
                     (when-let [get-module (jget webpack "getModule")]
-                      (.call get-module webpack (fn [m] (and (jget m "sendMessage") (fn? (jget m "sendMessage")))) #js {:searchExports true})))]
-    (if-not (jget actions "sendMessage")
+                      (.call get-module webpack (fn [m] (and (jget m "sendMessage") (fn? (jget m "sendMessage")))) #js {:searchExports true})))
+        send-message (jget actions "sendMessage")]
+    (if-not send-message
       false
-      (try
-        (await (jcall actions "sendMessage" channel-id body nil #js {:nonce (jget body "nonce")}))
-        true
-        (catch :default err
-          (log! "warn" nil (str "[" label "] MessageActions send failed") err)
-          false)))))
+      (send-message-action-attempts!
+       [(fn [] (.call send-message actions channel-id body nil #js {:nonce (jget body "nonce")}))
+        (fn [] (.call send-message actions channel-id body nil nil #js {:nonce (jget body "nonce")}))
+        (fn [] (.call send-message actions channel-id body #js {:nonce (jget body "nonce")}))]
+       label))))
 
 (defn ^:async send-discord-message! [_state channel-id content]
   (doseq [chunk (discord-message-chunks content)]
@@ -815,6 +898,45 @@
           (catch :default err
             (log! "warn" nil "Flush failed; will retry" err)))))))
 
+(defn- known-channels [state]
+  (let [channels (array)
+        channel-store (state-get state "channelStore")
+        guild-store (state-get state "guildStore")]
+    (doseq [guild-id (js/Object.keys (or (jcall guild-store "getGuilds") #js {}))]
+      (when-let [guild-channels (jcall channel-store "getMutableGuildChannelsForGuild" guild-id)]
+        (doseq [channel (js-values guild-channels)]
+          (when (= (jget channel "type") 0)
+            (.push channels channel)))))
+    (doseq [channel (js-values (or (jcall channel-store "getMutablePrivateChannels") #js {}))]
+      (.push channels channel))
+    channels))
+
+(defn- user-id-for-labeled-message [state message-id]
+  (some (fn [entry]
+          (let [user-id (aget entry 0)
+                message-ids (aget entry 1)]
+            (when (and message-ids (.has message-ids message-id)) user-id)))
+        (array-seq (js/Array.from (.entries (state-get state "bitchMessages"))))))
+
+(defn- find-channel-id-for-message [state message-id]
+  (some (fn [channel]
+          (let [channel-id (jget channel "id")]
+            (when (and channel-id (jcall (state-get state "messageStore") "getMessage" channel-id message-id))
+              channel-id)))
+        (array-seq (known-channels state))))
+
+(defn ^:async query-embedded-message! [state pending message-id embedded]
+  (let [event-id (str "discord:discord.message:" message-id)]
+    (when (.has embedded event-id)
+      (.delete pending message-id)
+      (when-let [user-id (user-id-for-labeled-message state message-id)]
+        (when-let [channel-id (find-channel-id-for-message state message-id)]
+          (let [message (jcall (state-get state "messageStore") "getMessage" channel-id message-id)]
+            (when (present-string? (jget message "content"))
+              (let [similar (await (query-semantic-similar (jget message "content") 5))]
+                (when (> (.-length similar) 0)
+                  (send-similar-to-watch! state user-id message similar))))))))))
+
 (defn ^:async run-semantic-scan! [state]
   (let [pending (state-get state "pendingSemanticQueries")]
     (when (> (.-size pending) 0)
@@ -832,9 +954,7 @@
                   data (when (jget res "ok") (await (.json res)))
                   embedded (js/Set. (.map (or (jget data "vectors") #js []) (fn [v] (or (jget v "sourceEventId") (jget v "id")))))]
               (doseq [message-id (array-seq to-check)]
-                (let [event-id (str "discord:discord.message:" message-id)]
-                  (when (.has embedded event-id)
-                    (.delete pending message-id)))))
+                (await (query-embedded-message! state pending message-id embedded))))
             (catch :default err
               (log! "warn" nil "Semantic scan failed" err))))))))
 
@@ -848,15 +968,7 @@
         (js-values (jget message "reactions"))))
 
 (defn- relevant-channels [state]
-  (let [channels (array)]
-    (doseq [guild-id (js/Object.keys (or (jcall (state-get state "guildStore") "getGuilds") #js {}))]
-      (when-let [guild-channels (jcall (state-get state "channelStore") "getMutableGuildChannelsForGuild" guild-id)]
-        (doseq [channel (js-values guild-channels)]
-          (when (= (jget channel "type") 0)
-            (.push channels channel)))))
-    (doseq [channel (js-values (or (jcall (state-get state "channelStore") "getMutablePrivateChannels") #js {}))]
-      (.push channels channel))
-    channels))
+  (known-channels state))
 
 (defn ^:async fetch-messages-from-channel [state channel-id since]
   (try
