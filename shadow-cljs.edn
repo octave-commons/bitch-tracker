@@ -2,7 +2,8 @@
  ["src" "test"]
 
  :dependencies
- [[org.clojure/core.async "1.6.681"]]
+ [[org.clojure/core.async "1.6.681"]
+  [metosin/malli "0.16.4"]]
 
  :builds
  {  :plugin
