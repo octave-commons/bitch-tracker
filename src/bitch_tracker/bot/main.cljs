@@ -13,31 +13,31 @@
 
 (defn ^:async start! []
   (js/console.log "[bot] Starting BitchTracker bot server...")
-   (let [config (cfg/load-bot-config)
-         ^js socket-state (socket/make-state)
-         ^js op-state (op/make-state config)
-         ^js dedup-state (dedup/make-state)]
-     (dedup/load! dedup-state (dedup/persist-path))
-     (-> (discord/create-client (:token config))
-         (.then (fn [^js discord-client]
-                  (set! (.-discord_client socket-state) discord-client)
-                  (set! (.-op_state socket-state) op-state)
-                  (set! (.-dedup_state socket-state) dedup-state)
-                  (op/start-timers! op-state config)
-                  (socket/start! socket-state config)
-                  (socket/notify-bot-online! socket-state config)
-                  (reset! state {:socket-state socket-state
-                                 :op-state op-state
-                                 :dedup-state dedup-state
-                                 :discord-client discord-client
-                                 :config config})
-                  (js/console.log "[bot] BitchTracker bot server started")
-                  (js/console.log "[bot] Socket.io port:" (:socket-port config))
-                  (js/console.log "[bot] Bot user ID:" (:bot-user-id config))
-                  (js/console.log "[bot] Dedup cache:" (.-size (.-cache dedup-state)) "entries")))
-         (.catch (fn [err]
-                   (js/console.error "[bot] Failed to start:" (.-message err))
-                   (js/process.exit 1))))))
+  (try
+    (let [config (cfg/load-bot-config)
+          ^js socket-state (socket/make-state)
+          ^js op-state (op/make-state config)
+          ^js dedup-state (dedup/make-state)
+          ^js discord-client (await (discord/create-client (:token config)))]
+      (dedup/load! dedup-state (dedup/persist-path))
+      (set! (.-discord_client socket-state) discord-client)
+      (set! (.-op_state socket-state) op-state)
+      (set! (.-dedup_state socket-state) dedup-state)
+      (op/start-timers! op-state config)
+      (socket/start! socket-state config)
+      (socket/notify-bot-online! socket-state config)
+      (reset! state {:socket-state socket-state
+                     :op-state op-state
+                     :dedup-state dedup-state
+                     :discord-client discord-client
+                     :config config})
+      (js/console.log "[bot] BitchTracker bot server started")
+      (js/console.log "[bot] Socket.io port:" (:socket-port config))
+      (js/console.log "[bot] Bot user ID:" (:bot-user-id config))
+      (js/console.log "[bot] Dedup cache:" (.-size (.-cache dedup-state)) "entries"))
+    (catch :default err
+      (js/console.error "[bot] Failed to start:" (.-message err))
+      (js/process.exit 1))))
 
 (defn stop! []
   (persist-dedup!)

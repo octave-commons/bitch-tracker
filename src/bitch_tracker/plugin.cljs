@@ -120,6 +120,13 @@
            (u/jget (u/jcall (state-get state "userStore") "getCurrentUser") "globalName")
            "")))
 
+(defn- bot-config-set [state key]
+  (let [cfg (socket/bot-config (state-get state "socket-state"))
+        value (u/jget cfg key)]
+    (if (instance? js/Set value)
+      value
+      (into #{} (map str) (u/js-values value)))))
+
 ;; ─────────────────────────────────────────────────────────────
 ;; Bot connection
 ;; ─────────────────────────────────────────────────────────────
@@ -135,20 +142,21 @@
         socket-state (socket/make-state)]
     (state-set! state "socket-state" socket-state)
     (state-set! state "bot-url" url)
-    (socket/connect! socket-state url
-                     #js {:userId (current-user-id state)
-                          :username (current-user-name state)
-                          :hostname (when (and (exists? js/window) (.-location js/window))
-                                      (.. js/window -location -hostname))}
-                     {:on-watch-alert (fn [data]
-                                        (let [user-id (str (u/jget data "userId"))
-                                              count (u/jget data "count")]
-                                          (toast! (str "Moderation watch alert: " user-id " (" count " labels)") "warning")
-                                          (log! "info" meta "Watch alert received" user-id count)))
-                      :on-tracker-msg (fn [data]
-                                        (log! "info" meta "Tracker message from bot" (u/jget data "reason")))
-                      :on-status (fn [data]
-                                   (log! "info" meta "Bot status" (u/jget data "status")))})
+     (socket/connect! socket-state url
+                      #js {:userId (current-user-id state)
+                           :username (current-user-name state)
+                           :hostname (when (and (exists? js/window) (.-location js/window))
+                                       (.. js/window -location -hostname))}
+                      {:on-watch-alert (fn [data]
+                                         (let [user-id (str (u/jget data "userId"))
+                                               count (u/jget data "count")]
+                                           (toast! (str "Moderation watch alert: " user-id " (" count " labels)") "warning")
+                                           (log! "info" meta "Watch alert received" user-id count)))
+                       :on-tracker-msg (fn [data]
+                                         (log! "info" meta "Tracker message from bot" (u/jget data "reason")))
+                       :on-status (fn [data]
+                                    (log! "info" meta "Bot status" (u/jget data "status")))})
+     (socket/request-config! socket-state)
     state))
 
 (defn- disconnect-from-bot! [state]
@@ -197,13 +205,13 @@
   (let [message (or (u/jget payload "message") payload)
         message-id (u/jget message "id")
         channel-id (or (u/jget message "channel_id") (u/jget message "channelId"))]
-        (when (and message-id channel-id (not= (u/jget message "state") "SENDING") (not= (u/jget message "type") 8))
+    (when (and message-id channel-id (not= (u/jget message "state") "SENDING") (not= (u/jget message "type") 8))
       (let [channel (channel-for state channel-id)
             guild-id (guild-id-for state message channel nil)
             aid (events/author-id message)]
-        (when (and (contains? c/guild-ids guild-id) (not= aid (current-user-id state)))
+        (when (and (contains? (bot-config-set state "guildIds") guild-id) (not= aid (current-user-id state)))
           (when-let [socket-state (state-get state "socket-state")]
-            (socket/send-event! socket-state (events/message-to-event message channel guild-id))))))))
+            (socket/send-event! socket-state (events/message-to-event message channel guild-id (bot-config-set state "knownLabelUserIds")))))))))
 
 (defn- handle-label-reaction! [state message-id channel-id reactor-user-id]
   (let [message (u/jcall (state-get state "messageStore") "getMessage" channel-id message-id)]
@@ -254,7 +262,7 @@
             emoji-id (str (or (u/jget payload "emoji" "id") ""))
             emoji (if (u/present-string? emoji-name) emoji-name emoji-id)
             user-id (str (or (u/jget payload "userId") ""))]
-        (when (contains? c/guild-ids guild-id)
+        (when (contains? (bot-config-set state "guildIds") guild-id)
           (when (events/label-emoji? emoji-name emoji)
             (handle-label-reaction! state message-id channel-id user-id))
           (when-let [socket-state (state-get state "socket-state")]
@@ -270,7 +278,7 @@
             emoji-id (str (or (u/jget payload "emoji" "id") ""))
              emoji (if (u/present-string? emoji-name) emoji-name emoji-id)
              user-id (str (or (u/jget payload "userId") ""))]
-         (when (and (contains? c/guild-ids guild-id) (events/label-emoji? emoji-name emoji))
+         (when (and (contains? (bot-config-set state "guildIds") guild-id) (events/label-emoji? emoji-name emoji))
            (handle-label-reaction-remove! state message-id channel-id user-id))))))
 
 ;; ─────────────────────────────────────────────────────────────
@@ -320,7 +328,7 @@
       (.append root
                (field! document "Bot socket.io URL" "BitchTracker" "botUrl" saved-url "http://127.0.0.1:7878" false)
                (append-text! document root "div" (str "Status: " (connection-status state)))
-               (append-text! document root "div" (str "Allowlisted guild IDs: " (str/join ", " c/guild-ids)))
+               (append-text! document root "div" (str "Allowlisted guild IDs: " (str/join ", " (bot-config-set state "guildIds"))))
                (append-text! document root "div" (str "Tracker channel: " c/tracker-channel-id))
                (append-text! document root "div" (str "Watch channel: " c/watch-channel-id))
                (append-text! document root "div" (str "Tracked users: " (.-size (state-get state "bitchCounts")) ", labeled messages: " (.-size (state-get state "labeledMessages"))))

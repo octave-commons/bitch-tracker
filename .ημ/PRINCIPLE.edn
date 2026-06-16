@@ -176,7 +176,7 @@
       "(q (ctx ...) (ask ...) (why-blocked ...))")
 
     (uncertainty
-      "Uncertainty may be annotated inline with `ლა` (soft) / `לג` (hard) per (uncertainty-operators ...).")
+      "Uncertainty may be annotated inline with `ლა` (soft) / `לா` (hard) per (uncertainty-operators ...).")
 
     (rule
       "Observations cannot become facts without evidence."))

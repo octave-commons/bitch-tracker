@@ -24,7 +24,16 @@
   ([emoji-name emoji]
    (some #(or (= (str emoji-name) %) (= (str emoji) %)) [c/poodle-emoji c/clown-emoji])))
 
-(defn message-to-event [message channel guild-id]
+(defn- message-timestamp [message]
+  (let [ts (u/jget message "timestamp")
+        ts-internal (u/jget message "timestamp" "_i")
+        raw (if (some? ts) ts (if (some? ts-internal) ts-internal (.getTime (js/Date.))))
+        date (js/Date. raw)]
+    (if (js/isNaN (.getTime date))
+      (.toISOString (js/Date.))
+      (.toISOString date))))
+
+(defn message-to-event [message channel guild-id known-label-user-ids]
   (let [author (or (u/jget message "author") #js {})
         aid (str (or (u/jget author "id") (u/jget message "author_id") "unknown"))
         content (if (string? (u/jget message "content")) (u/jget message "content") "")
@@ -45,9 +54,9 @@
                        :url (u/jget e "url")
                        :provider (u/jget e "provider" "name")})
                     (u/js-values (u/jget message "embeds")))
-        ts (.toISOString (js/Date. (or (u/jget message "timestamp") (u/jget message "timestamp" "_i") (.getTime (js/Date.)))))
+        ts (message-timestamp message)
         labels (cond-> []
-                 (contains? c/known-label-user-ids aid) (conj "moderation-watch:known-user" (str "moderation-watch:user:" aid)))]
+                 (contains? known-label-user-ids aid) (conj "moderation-watch:known-user" (str "moderation-watch:user:" aid)))]
     (clj->js {:schema "openplanner.event.v1"
               :schema_version 1
               :id (str "discord:" guild-id ":" (or (u/jget message "channel_id") (u/jget message "channelId")) ":" (u/jget message "id"))
@@ -67,7 +76,7 @@
                      :author_global_name (u/jget author "globalName")
                      :bot (boolean (u/jget author "bot"))
                      :tags (cond-> ["discord" "message"]
-                             (contains? c/known-label-user-ids aid) (into ["known-watch-user" "moderation-watch"]))}
+                             (contains? known-label-user-ids aid) (into ["known-watch-user" "moderation-watch"]))}
               :extra (cond-> {:guild_id guild-id
                                :channel_id (str (or (u/jget message "channel_id") (u/jget message "channelId")))
                                :channel_name (u/jget channel "name")
@@ -86,7 +95,7 @@
                        (seq labels) (assoc :openplanner_labels {:claim_system "discord-moderation-watch-v1"
                                                                  :labels (vec (distinct labels))
                                                                  :updated_at (u/now-iso)})
-                       (contains? c/known-label-user-ids aid) (assoc :is_known_watch_user true))})))
+                       (contains? known-label-user-ids aid) (assoc :is_known_watch_user true))})))
 
 (defn reaction-to-event [reaction _channel guild-id emoji user-id quality]
   (let [message-id (str (or (u/jget reaction "messageId") ""))

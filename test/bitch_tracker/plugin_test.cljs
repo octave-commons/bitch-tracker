@@ -60,8 +60,8 @@
                        :embeds #js []
                        :mentions #js []
                        :mention_roles #js []}
-          channel #js {:id "c1" :name "general"}
-          event (events/message-to-event message channel "1391832426048651334")]
+           channel #js {:id "c1" :name "general"}
+           event (events/message-to-event message channel "1391832426048651334" #{})]
       (is (= "openplanner.event.v1" (aget event "schema")))
       (is (= "discord.message" (aget event "kind")))
       (is (= "hello" (aget event "text")))
@@ -80,8 +80,8 @@
                        :embeds #js []
                        :mentions #js []
                        :mention_roles #js []}
-          channel #js {:id "c1" :name "general"}
-          event (events/message-to-event message channel "1391832426048651334")]
+           channel #js {:id "c1" :name "general"}
+           event (events/message-to-event message channel "1391832426048651334" #{"59259128266100736"})]
       (is (true? (aget event "extra" "is_known_watch_user")))
       (is (some #{"known-watch-user"} (array-seq (aget event "meta" "tags")))))))
 
@@ -123,7 +123,7 @@
       (is (= 1 (.-misses state)))
       (is (= 1 (.-hits state))))))
 
-(deftest dedup-prunes-by-age-and-size
+(deftest ^:async dedup-prunes-by-age-and-size
   (testing "dedup cache evicts stale entries and caps size"
     (let [state (dedup/make-state)]
       (is (dedup/add! state "old" 1 100))

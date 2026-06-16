@@ -15,7 +15,8 @@
   #js {"queue" #js []
        "pending_semantic_queries" (js/Set.)
        "flush_timer" nil
-       "semantic_scan_timer" nil})
+       "semantic_scan_timer" nil
+       "flush_inflight" false})
 
 (defn queue-event! [^js state event max-persisted]
   (when event
@@ -25,23 +26,28 @@
   event)
 
 (defn ^:async flush! [^js state config]
-  (let [queue (.-queue state)
-        api-key (:openplanner-api-key config)]
-    (when (and (> (.-length queue) 0) (u/present-string? api-key))
-      (let [batch (.slice queue 0 (:max-batch-size config))]
-        (try
-          (let [res (await (js/fetch (endpoint config)
-                                     #js {:method "POST"
-                                          :headers #js {"content-type" "application/json"
-                                                        "authorization" (auth-header api-key)}
-                                          :body (js/JSON.stringify #js {:events batch})}))]
-            (if (.-ok res)
-              (do
-                (.splice queue 0 (.-length batch))
-                (js/console.log "[openplanner] Sent event batch" (.-length batch)))
-              (throw (js/Error. (str (.-status res) " " (.-statusText res))))))
-          (catch :default err
-            (js/console.warn "[openplanner] Flush failed; will retry" err)))))))
+  (when (.-flush_inflight state) (js/Promise.resolve nil))
+  (set! (.-flush_inflight state) true)
+  (try
+    (let [queue (.-queue state)
+          api-key (:openplanner-api-key config)]
+      (when (and (> (.-length queue) 0) (u/present-string? api-key))
+        (let [batch (.slice queue 0 (:max-batch-size config))]
+          (try
+            (let [res (await (js/fetch (endpoint config)
+                                       #js {:method "POST"
+                                            :headers #js {"content-type" "application/json"
+                                                          "authorization" (auth-header api-key)}
+                                            :body (js/JSON.stringify #js {:events batch})}))]
+              (if (.-ok res)
+                (do
+                  (.splice queue 0 (.-length batch))
+                  (js/console.log "[openplanner] Sent event batch" (.-length batch)))
+                (throw (js/Error. (str (.-status res) " " (.-statusText res))))))
+            (catch :default err
+              (js/console.warn "[openplanner] Flush failed; will retry" err))))))
+    (finally
+      (set! (.-flush_inflight state) false))))
 
 (defn ^:async query-semantic-similar [text k config]
   (let [api-key (:openplanner-api-key config)
@@ -67,7 +73,7 @@
             #js [])))))
 
 (defn ^:async run-semantic-scan! [^js state config]
-  (let [pending (.-pending-semantic-queries state)]
+  (let [pending (.-pending_semantic_queries state)]
     (when (> (.-size pending) 0)
       (let [api-key (:openplanner-api-key config)
             base-url (:openplanner-base-url config)]
@@ -91,15 +97,15 @@
 (defn start-timers! [^js state config]
   (let [flush-timer (js/setInterval #(flush! state config) (:flush-every-ms config))
         semantic-timer (js/setInterval #(run-semantic-scan! state config) (:semantic-scan-every-ms config))]
-    (set! (.-flush-timer state) flush-timer)
-    (set! (.-semantic-scan-timer state) semantic-timer)
+    (set! (.-flush_timer state) flush-timer)
+    (set! (.-semantic_scan_timer state) semantic-timer)
     state))
 
 (defn stop-timers! [^js state]
-  (when (.-flush-timer state)
-    (js/clearInterval (.-flush-timer state))
-    (set! (.-flush-timer state) nil))
-  (when (.-semantic-scan-timer state)
-    (js/clearInterval (.-semantic-scan-timer state))
-    (set! (.-semantic-scan-timer state) nil))
+  (when (.-flush_timer state)
+    (js/clearInterval (.-flush_timer state))
+    (set! (.-flush_timer state) nil))
+  (when (.-semantic_scan_timer state)
+    (js/clearInterval (.-semantic_scan_timer state))
+    (set! (.-semantic_scan_timer state) nil))
   state)

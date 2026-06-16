@@ -8,6 +8,7 @@
        :user-info nil
        :connected false
        :reconnect-timer nil
+       :bot-config nil
        :on-watch-alert nil
        :on-tracker-msg nil
        :on-status nil})
@@ -54,6 +55,11 @@
            (when-let [^js cb (.-on-status client-state)]
              (cb data))))
 
+    (.on socket proto/config-response-to-plugin
+         (fn [data]
+           (set! (.-bot-config client-state) data)
+           (js/console.log "[socket] Bot config received" data)))
+
     (.on socket "connect_error"
          (fn [err]
            (js/console.warn "[socket] Connection error:" (.-message err))))
@@ -79,6 +85,9 @@
 
 (defn request-config! [^js client-state]
   (emit! client-state proto/config-request-to-bot #js {}))
+
+(defn bot-config [^js client-state]
+  (or (.-bot-config client-state) #js {}))
 
 (defn disconnect! [^js client-state]
   (when-let [^js socket (.-socket client-state)]

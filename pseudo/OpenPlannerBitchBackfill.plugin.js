@@ -315,7 +315,7 @@ module.exports = class OpenPlannerBitchBackfill {
     const channelId = CONFIG.bitchTrackerChannelId;
     console.log(`[Bitch Backfill] _sendRawTrackerMessage called for ${channelId}`);
     if (!channelId) return;
-    const body = { content, nonce: this._nonce(), tts: false };
+    const body = { content, nonce: this._nonce(), tts: false, allowed_mentions: { parse: [] } };
 
     const Http = BdApi.findModuleByProps?.("get", "post", "put", "del")
       || BdApi.Webpack.getModule(m => m?.post && m?.get && typeof m.post === "function", { searchExports: true })
@@ -449,7 +449,8 @@ module.exports = class OpenPlannerBitchBackfill {
   _watchConfig() {
     try {
       const fs = require("fs");
-      const file = "/home/err/snap/discord/278/.config/BetterDiscord/plugins/OpenPlannerModerationWatchlist.json";
+      const path = require("path");
+      const file = path.resolve(__dirname, "OpenPlannerModerationWatchlist.json");
       if (!fs.existsSync(file)) return {};
       return JSON.parse(fs.readFileSync(file, "utf8"));
     } catch (err) {

@@ -29,22 +29,22 @@
 
 (defn- add-label-reactor! [^js state user-id message-id reactor-id]
   (let [key (label-key user-id message-id)
-        reactors (or (.get (.-label-reactors state) key) (js/Set.))]
+        reactors (or (.get (.-label_reactors state) key) (js/Set.))]
     (when (= 0 (.-size reactors))
-      (.set (.-label-reactors state) key reactors))
+      (.set (.-label_reactors state) key reactors))
     (when-not (.has reactors reactor-id)
       (.add reactors reactor-id)
       true)))
 
 (defn- remove-label-reactor! [^js state user-id message-id reactor-id]
   (let [key (label-key user-id message-id)
-        reactors (.get (.-label-reactors state) key)]
+        reactors (.get (.-label_reactors state) key)]
     (when reactors
       (.delete reactors reactor-id)
       (= 0 (.-size reactors)))))
 
 (defn label-count [^js state user-id]
-  (let [reactors-map (.-label-reactors state)
+  (let [reactors-map (.-label_reactors state)
         total (atom 0)]
     (doseq [entry (array-seq (js/Array.from (.entries reactors-map)))]
       (let [key (aget entry 0)
@@ -90,10 +90,10 @@
   (or (:dedup-max-size _config) 50000))
 
 (defn handle-incoming-event! [^js state event]
-  (let [^js op-state (.-op-state state)
+  (let [^js op-state (.-op_state state)
         config (.-config state)
-        ^js discord-client (.-discord-client state)
-        ^js dedup-state (.-dedup-state state)]
+        ^js discord-client (.-discord_client state)
+        ^js dedup-state (.-dedup_state state)]
     (when (and event dedup-state)
       (when (dedup/add! dedup-state (event-id event) (dedup-ttl-ms config) (dedup-max-size config))
         (when (and op-state config)
@@ -178,7 +178,9 @@
            #js {:trackerChannelId (:tracker-channel-id config)
                 :watchChannelId (:watch-channel-id config)
                 :labelThreshold (:label-threshold config)
-                :botUserId (:bot-user-id config)})))
+                :botUserId (:bot-user-id config)
+                :guildIds (clj->js (:guild-ids config))
+                :knownLabelUserIds (clj->js (:known-label-user-ids config))})))
 
 (defn notify-bot-online! [^js state config]
   (let [^js discord-client (.-discord_client state)
@@ -194,7 +196,7 @@
 
 (defn- notify-status! [^js state status socket]
   (let [config (.-config state)
-        ^js discord-client (.-discord_client state)
+        ^js discord-client (.-discord-client state)
         channel-id (:plugin-status-channel-id config)
         identity (when socket (.-plugin_identity ^js socket))
         user-id (when identity (str (u/jget identity "user_id")))

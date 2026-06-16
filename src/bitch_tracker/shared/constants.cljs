@@ -26,18 +26,3 @@
 (def default-semantic-query-instruction
   "Represent the Discord message for semantic retrieval of similar moderation incidents: sexist, racist, transphobic, ableist, antisemitic, misgendering, harassment, or 'just joking' bigotry. Retrieve messages with similar abusive social behavior and intent, not merely exact wording.")
 
-(def guild-ids
-  #{"1228232798448390144"
-    "1391832426048651334"
-    "974519864045756446"
-    "1128867683291627614"
-    "244230771232079873"
-    "1425557239808393418"})
-
-(def known-label-user-ids
-  #{"59259128266100736"
-    "376762142910578692"
-    "440099490364391435"
-    "1441420406711124169"
-    "281812122445283330"
-    "853343486756388944"})

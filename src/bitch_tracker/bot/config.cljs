@@ -19,6 +19,13 @@
         (when-not (str/blank? v) v))
       default))
 
+(defn- parse-id-set [value]
+  (cond
+    (set? value) value
+    (string? value) (into #{} (comp (map str/trim) (remove str/blank?)) (str/split value #","))
+    (sequential? value) (into #{} (comp (map str) (map str/trim) (remove str/blank?)) value)
+    :else #{}))
+
 (defn load-bot-config []
   (let [path (js/require "path")
         bot-json-path (.join path ((.-cwd js/process)) "bot.json")
@@ -39,9 +46,11 @@
      :openplanner-base-url (str/replace (env-or "OPENPLANNER_BASE_URL" c/default-openplanner-url) #"/+$" "")
      :openplanner-api-key (env-or "OPENPLANNER_API_KEY" "")
      :openplanner-project (env-or "OPENPLANNER_PROJECT" c/default-project)
-     :tracker-channel-id (env-or "BITCH_TRACKER_CHANNEL_ID" c/tracker-channel-id)
-     :watch-channel-id (env-or "BITCH_TRACKER_WATCH_CHANNEL_ID" c/watch-channel-id)
-     :label-threshold (js/parseInt (env-or "BITCH_TRACKER_LABEL_THRESHOLD" (str c/label-threshold)) 10)
+      :tracker-channel-id (env-or "BITCH_TRACKER_CHANNEL_ID" c/tracker-channel-id)
+      :watch-channel-id (env-or "BITCH_TRACKER_WATCH_CHANNEL_ID" c/watch-channel-id)
+      :label-threshold (js/parseInt (env-or "BITCH_TRACKER_LABEL_THRESHOLD" (str c/label-threshold)) 10)
+      :guild-ids (parse-id-set (env-or "BITCH_TRACKER_GUILD_IDS" (u/jget bot-json "guildIds")))
+      :known-label-user-ids (parse-id-set (env-or "BITCH_TRACKER_KNOWN_LABEL_USER_IDS" (u/jget bot-json "knownLabelUserIds")))
      :flush-every-ms (js/parseInt (env-or "BITCH_TRACKER_FLUSH_MS" (str c/flush-every-ms)) 10)
      :semantic-scan-every-ms (js/parseInt (env-or "BITCH_TRACKER_SEMANTIC_SCAN_MS" (str c/semantic-scan-every-ms)) 10)
      :max-batch-size (js/parseInt (env-or "BITCH_TRACKER_MAX_BATCH" (str c/max-batch-size)) 10)
