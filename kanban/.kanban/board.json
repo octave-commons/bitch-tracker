@@ -1,0 +1,128 @@
+{
+  "generatedAt": "2026-06-01T18:37:09.668Z",
+  "totalTasks": 3,
+  "columns": [
+    {
+      "status": "icebox",
+      "title": "Icebox",
+      "taskCount": 0,
+      "tasks": []
+    },
+    {
+      "status": "incoming",
+      "title": "Incoming",
+      "taskCount": 0,
+      "tasks": []
+    },
+    {
+      "status": "accepted",
+      "title": "Accepted",
+      "taskCount": 0,
+      "tasks": []
+    },
+    {
+      "status": "breakdown",
+      "title": "Breakdown",
+      "taskCount": 0,
+      "tasks": []
+    },
+    {
+      "status": "blocked",
+      "title": "Blocked",
+      "taskCount": 0,
+      "tasks": []
+    },
+    {
+      "status": "ready",
+      "title": "Ready",
+      "taskCount": 0,
+      "tasks": []
+    },
+    {
+      "status": "todo",
+      "title": "Todo",
+      "taskCount": 0,
+      "tasks": []
+    },
+    {
+      "status": "in_progress",
+      "title": "In Progress",
+      "taskCount": 0,
+      "tasks": []
+    },
+    {
+      "status": "review",
+      "title": "Review",
+      "taskCount": 0,
+      "tasks": []
+    },
+    {
+      "status": "document",
+      "title": "Document",
+      "taskCount": 0,
+      "tasks": []
+    },
+    {
+      "status": "done",
+      "title": "Done",
+      "taskCount": 3,
+      "tasks": [
+        {
+          "uuid": "bitch-tracker-src-pseudo-parity-audit",
+          "title": "Audit src/pseudo feature parity",
+          "slug": "audit-src-pseudo-feature-parity",
+          "status": "done",
+          "priority": "P1",
+          "labels": [
+            "parity",
+            "audit",
+            "betterdiscord",
+            "cljs"
+          ],
+          "createdAt": "2026-06-01T00:00:00Z",
+          "content": "# Audit src/pseudo feature parity\n\n## Goal\n\nProduce a concrete parity ledger comparing `src/bitch_tracker/plugin.cljs` against the reference artifacts in `pseudo/`.\n\n## Context\n\nA first pass found that `src/` is close for the OpenPlanner ingest/backfill path, but not at full `pseudo/` parity.\n\n## Scope\n\n- Compare `src/bitch_tracker/plugin.cljs` with:\n  - `pseudo/OpenPlannerEventIngest.plugin.js`\n  - `pseudo/OpenPlannerBitchBackfill.plugin.js`\n  - `pseudo/OpenPlannerModerationWatchlist.json`\n  - `pseudo/discord-slur-patterns.js`\n- Explicitly classify these as in-scope or out-of-scope:\n  - `pseudo/HideDisabledEmojis.plugin.js`\n  - `pseudo/UXXDiscord.plugin.js`\n  - runtime state fixtures/config dumps\n\n## Acceptance criteria\n\n- [x] A checked-in parity table exists.\n- [x] Each pseudo feature is marked `present`, `partial`, `missing`, or `intentional-drop`.\n- [x] Each missing/partial in-scope feature has a follow-up task or is folded into an implementation task.\n- [x] Test coverage gaps are listed alongside feature gaps.",
+          "sourcePath": "kanban/2026-06-01-src-pseudo-parity-audit.md"
+        },
+        {
+          "uuid": "bitch-tracker-openplanner-ingest-gap-closure",
+          "title": "Close OpenPlanner ingest/backfill parity gaps",
+          "slug": "close-openplanner-ingest-backfill-parity-gaps",
+          "status": "done",
+          "priority": "P1",
+          "labels": [
+            "parity",
+            "implementation",
+            "betterdiscord",
+            "cljs",
+            "tests"
+          ],
+          "createdAt": "2026-06-01T00:00:00Z",
+          "content": "# Close OpenPlanner ingest/backfill parity gaps\n\n## Goal\n\nBring the CLJS BetterDiscord plugin to intended parity with the OpenPlanner event-ingest and backfill pseudo implementations.\n\n## Known candidate gaps\n\n- [x] Port or intentionally drop pseudo `_addUserNote` behavior.\n- [x] Add bot REST retry handling for `429` retry-after and transient `5xx` responses, or document why not needed.\n- [x] Redact bot tokens from failed bot-send response logs.\n- [x] Decide whether `.env` file fallback from pseudo should exist in CLJS or remain settings/env-only.\n- [x] Strengthen semantic scan parity, including finding the original message/channel after embeddings appear.\n- [x] Add tests for protected-channel bot-only send behavior without leaking secrets.\n- [x] Add tests for moderation watchlist loading and reaction labels.\n\n## Acceptance criteria\n\n- [x] `pnpm test` passes.\n- [x] The parity ledger marks OpenPlanner ingest/backfill core as `present` or documents any intentional drops.\n- [x] No secrets or bot tokens are logged in tests or runtime error messages.\n- [x] BetterDiscord export verification still passes.\n\n---\nStarted implementation: added token-redacted bot send failure logging, retry-after parsing visibility, and Discord user note tagging when the moderation threshold is reached.\n\nContinued implementation: extracted safe async bot-send retry helper, added 429/5xx retry tests, added explicit quality reaction test, and strengthened pending semantic scan to recover channel/message and run delayed similarity searches after embeddings appear.\n\nFinished scoped gap closure: added moderation watchTerms and flush-failure queue preservation tests, ported pseudo's multiple MessageActions send signatures, and decided `.env` file fallback plus named slur helper code are intentional drops in favor of explicit settings/config.\n---",
+          "sourcePath": "kanban/2026-06-01-openplanner-ingest-gap-closure.md"
+        },
+        {
+          "uuid": "bitch-tracker-pseudo-plugin-scope-decision",
+          "title": "Decide scope for non-ingest pseudo plugins",
+          "slug": "decide-scope-for-non-ingest-pseudo-plugins",
+          "status": "done",
+          "priority": "P2",
+          "labels": [
+            "parity",
+            "scope",
+            "betterdiscord",
+            "uxx"
+          ],
+          "createdAt": "2026-06-01T00:00:00Z",
+          "content": "# Decide scope for non-ingest pseudo plugins\n\n## Goal\n\nDecide whether pseudo artifacts unrelated to the BitchTracker ingest/backfill plugin should be migrated, split out, archived, or explicitly ignored for parity.\n\n## Final decision\n\n`pseudo/UXXDiscord.plugin.js` is part of the active BetterDiscord setup as a companion plugin. It should use the `@open-hax/uxx` npm package token build for styles. `HideDisabledEmojis` remains out of scope.\n\n## Artifacts under decision\n\n- `pseudo/HideDisabledEmojis.plugin.js`\n- `pseudo/HideDisabledEmojis.config.json`\n- `pseudo/UXXDiscord.plugin.js`\n- `pseudo/discord-slur-patterns.js`\n- large runtime config/state dumps such as `pseudo/OpenPlannerEventIngest.config.json`\n\n## Decision options\n\n1. Treat `HideDisabledEmojis` as out-of-scope reference material.\n2. Keep `UXXDiscord.plugin.js` active as a separate BetterDiscord plugin that imports UXX package tokens.\n3. Port selected pieces into BitchTracker only when they directly support moderation ingest.\n\n## Acceptance criteria\n\n- [x] A scope decision is written in the parity ledger or README.\n- [x] Non-ingest pseudo artifacts are either tracked by separate tasks or marked intentional-drop/out-of-scope.\n- [x] The user-facing parity claim becomes unambiguous.",
+          "sourcePath": "kanban/2026-06-01-pseudo-plugin-scope-decision.md"
+        }
+      ]
+    },
+    {
+      "status": "rejected",
+      "title": "Rejected",
+      "taskCount": 0,
+      "tasks": []
+    }
+  ]
+}

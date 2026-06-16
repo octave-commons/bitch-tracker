@@ -1,11 +1,21 @@
 {:source-paths
  ["src" "test"]
 
+ :dependencies
+ [[org.clojure/core.async "1.6.681"]]
+
  :builds
- {:plugin
+ {  :plugin
   {:target :node-script
    :main bitch-tracker.plugin/main!
    :output-to "build/BitchTracker.raw.js"
+   :compiler-options
+   {:infer-externs :auto}}
+
+  :bot
+  {:target :node-script
+   :main bitch-tracker.bot.main/main!
+   :output-to "build/bitch-tracker-bot.js"
    :compiler-options
    {:infer-externs :auto}}
 

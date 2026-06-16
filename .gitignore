@@ -2,7 +2,9 @@
 /.clj-kondo/.cache/
 /.cpcache/
 /.calva/
+/.lsp/
 /build/
 /dist/
 /node_modules/
 *.log
+/.config
