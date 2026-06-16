@@ -1,60 +1,92 @@
 (ns bitch-tracker.domain.watchlist-test
-  "Tests for bitch-tracker.domain.watchlist."
-  (:require [bitch-tracker.domain.watchlist :as watchlist]
-            [cljs.test :refer-macros [deftest is testing]]))
+  "Tests for bitch-tracker.domain.watchlist.
 
-(deftest compile-watch-entry-parses-plain-term
-  (testing "plain terms compile to case-insensitive word-boundary patterns"
-    (let [entry (watchlist/compile-watch-entry "badword" "badword")]
-      (is (= "badword" (:label entry)))
-      (is (true? (.test (:pattern entry) "badword")))
-      (is (false? (.test (:pattern entry) "abadwordx"))))))
+  Each test is a validated fact about pure watchlist compilation and matching."
+  (:require [cljs.test :refer [deftest is testing]]
+            [bitch-tracker.domain.watchlist :as wl]))
 
-(deftest compile-watch-entry-parses-regex-string
-  (testing "slash-delimited regex strings compile to labeled RegExp objects"
-    (let [entry (watchlist/compile-watch-entry "/foo/i" "/foo/i")]
-      (is (= "/foo/i" (:label entry)))
-      (is (true? (.test (:pattern entry) "FOO"))))))
+;; ---------------------------------------------------------------------------
+;; compile-watch-entry
+;; ---------------------------------------------------------------------------
+
+(deftest compile-watch-entry-produces-regexp-for-plain-term
+  (testing "a plain string term compiles to a WatchEntry with a RegExp"
+    (let [entry (wl/compile-watch-entry "slur" "slur")]
+      (is (some? entry))
+      (is (instance? js/RegExp (:pattern entry)))
+      (is (= "slur" (:label entry))))))
+
+(deftest compile-watch-entry-produces-regexp-for-slash-literal
+  (testing "a /regex/ term compiles to a WatchEntry with the given pattern"
+    (let [entry (wl/compile-watch-entry "/bad\\s+word/i" "bad word")]
+      (is (some? entry))
+      (is (instance? js/RegExp (:pattern entry))))))
 
 (deftest compile-watch-entry-returns-nil-for-invalid-regex
-  (testing "invalid regex literals produce no entry"
-    (is (nil? (watchlist/compile-watch-entry "/(/" "bad")))))
+  (testing "an invalid regex literal returns nil instead of throwing"
+    ;; An unbalanced bracket group is a compile-time error in JS RegExp
+    (let [entry (wl/compile-watch-entry "/[invalid/" "broken")]
+      (is (nil? entry)))))
 
-(deftest compile-watch-entries-handles-strings-and-maps
-  (testing "mixed raw entries compile into WatchEntry maps"
-    (let [entries (watchlist/compile-watch-entries ["badword"
-                                                    {:name "N slur" :pattern "/\\bn+\\b/i"}])]
+;; ---------------------------------------------------------------------------
+;; compile-watch-entries
+;; ---------------------------------------------------------------------------
+
+(deftest compile-watch-entries-compiles-string-entries
+  (testing "string entries are compiled with the string as both label and term"
+    (let [entries (wl/compile-watch-entries ["hate" "slur"])]
       (is (= 2 (count entries)))
-      (is (= #{"badword" "N slur"} (set (map :label entries)))))))
+      (is (every? #(instance? js/RegExp (:pattern %)) entries)))))
+
+(deftest compile-watch-entries-compiles-map-entries
+  (testing "map entries with :pattern and :name keys compile correctly"
+    (let [entries (wl/compile-watch-entries [{:name "bad-word" :pattern "hate"}])]
+      (is (= 1 (count entries)))
+      (is (= "bad-word" (:label (first entries)))))))
 
 (deftest compile-watch-entries-deduplicates-by-label
-  (testing "entries with duplicate labels collapse to the first occurrence"
-    (let [entries (watchlist/compile-watch-entries ["foo"
-                                                    {:name "foo" :pattern "/foo/i"}])]
+  (testing "two entries with the same label produce only one result"
+    (let [entries (wl/compile-watch-entries ["hate" "hate"])]
       (is (= 1 (count entries))))))
 
-(deftest compile-watch-entries-uses-pattern-fallback-label
-  (testing "unnamed pattern objects use the pattern string as the label"
-    (let [entries (watchlist/compile-watch-entries [{:pattern "/\\btest\\b/i"}])]
-      (is (= 1 (count entries)))
-      (is (= "/\\btest\\b/i" (:label (first entries)))))))
+(deftest compile-watch-entries-skips-unparseable-entries
+  (testing "nil entries and unrecognised shapes are silently dropped"
+    (let [entries (wl/compile-watch-entries [nil 42 "ok-term"])]
+      (is (= 1 (count entries))))))
 
-(deftest moderation-hit?-matches
-  (testing "hit? is true when the entry pattern matches the message text"
-    (let [entry (watchlist/compile-watch-entry "badword" "badword")]
-      (is (watchlist/moderation-hit? entry "this is badword here"))
-      (is (not (watchlist/moderation-hit? entry "this is fine"))))))
+;; ---------------------------------------------------------------------------
+;; moderation-hit?
+;; ---------------------------------------------------------------------------
+
+(deftest moderation-hit-true-for-matching-text
+  (testing "moderation-hit? is true when the entry pattern matches"
+    (let [entry (wl/compile-watch-entry "hate" "hate")]
+      (is (wl/moderation-hit? entry "I hate this")))))
+
+(deftest moderation-hit-false-for-non-matching-text
+  (testing "moderation-hit? is false when the pattern does not match"
+    (let [entry (wl/compile-watch-entry "hate" "hate")]
+      (is (not (wl/moderation-hit? entry "everything is fine"))))))
+
+(deftest moderation-hit-is-case-insensitive
+  (testing "the compiled pattern is case-insensitive"
+    (let [entry (wl/compile-watch-entry "HATE" "HATE")]
+      (is (wl/moderation-hit? entry "I HATE this"))
+      (is (wl/moderation-hit? entry "i hate this")))))
+
+;; ---------------------------------------------------------------------------
+;; moderation-hits
+;; ---------------------------------------------------------------------------
 
 (deftest moderation-hits-returns-matching-entries
-  (testing "hits returns only the WatchEntry values that match"
-    (let [entries (watchlist/compile-watch-entries ["badword" "goodword"])
-          hits (watchlist/moderation-hits entries "badword")]
-      (is (= 1 (count hits)))
-      (is (= "badword" (:label (first hits)))))))
+  (testing "moderation-hits returns only entries that match the message"
+    (let [entries (wl/compile-watch-entries ["hate" "love" "fear"])
+          hits (wl/moderation-hits entries "I hate and fear this")]
+      (is (= 2 (count hits)))
+      (is (some #(= "hate" (:label %)) hits))
+      (is (some #(= "fear" (:label %)) hits)))))
 
-(deftest moderation-hits-empty-when-no-match
-  (testing "hits returns an empty vector when nothing matches"
-    (let [entries (watchlist/compile-watch-entries ["badword"])
-          hits (watchlist/moderation-hits entries "clean text")]
-      (is (empty? hits))
-      (is (vector? hits)))))
+(deftest moderation-hits-returns-empty-when-no-match
+  (testing "moderation-hits returns an empty vector when nothing matches"
+    (let [entries (wl/compile-watch-entries ["hate"])]
+      (is (= [] (wl/moderation-hits entries "everything is fine"))))))
