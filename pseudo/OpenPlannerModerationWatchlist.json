@@ -1,0 +1,7 @@
+{
+  "watchTerms": [],
+  "watchRegexes": [
+    "/nigge.|tr.nny|f.ggot|k.ke|r.tard|jew/i"
+  ],
+  "notes": "Shared moderation watchlist for OpenPlanner Discord plugins. watchTerms are literal comma-free terms. watchRegexes are JavaScript regex strings. Current starter regex follows the local moderation seed request. BetterDiscord plugin settings are also read as an additive source."
+}

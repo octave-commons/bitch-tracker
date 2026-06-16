@@ -2,12 +2,14 @@
   "name": "@octave-commons/bitch-tracker",
   "version": "0.0.1",
   "private": true,
-  "description": "Shadow-CLJS BetterDiscord plugin scaffold for Discord moderation/event tracking.",
+  "description": "Shadow-CLJS BetterDiscord plugin and Discord bot for OpenPlanner moderation/event tracking.",
   "license": "GPL-3.0-or-later",
   "type": "commonjs",
   "scripts": {
     "clean": "rm -rf build dist .shadow-cljs",
-    "build:cljs": "pnpm dlx shadow-cljs@3.4.11 release plugin",
+    "build:plugin:cljs": "pnpm dlx shadow-cljs@3.4.11 release plugin",
+    "build:bot:cljs": "pnpm dlx shadow-cljs@3.4.11 release bot",
+    "build:cljs": "pnpm run build:plugin:cljs && pnpm run build:bot:cljs",
     "bundle": "node scripts/write-bd-plugin.mjs",
     "build": "pnpm run build:cljs && pnpm run bundle && pnpm run verify",
     "lint:clj": "clj-kondo --lint src test",
@@ -16,7 +18,13 @@
     "verify": "node scripts/verify-bd-export.mjs",
     "test": "pnpm run lint:clj && pnpm run test:cljs && pnpm run build"
   },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
+  },
   "devDependencies": {
+    "esbuild": "^0.28.1",
     "shadow-cljs": "3.4.11"
   },
   "engines": {

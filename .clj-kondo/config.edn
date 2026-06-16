@@ -1,3 +1,18 @@
 {:linters
  {:unresolved-symbol
-  {:exclude [await]}}}
+  {:exclude [await]}
+
+  :missing-docstring
+  {:level :warning}
+
+  :unused-value
+  {:level :warning}
+
+  :shadowed-var
+  {:level :warning}
+
+  :used-underscored-binding
+  {:level :warning}
+
+  :unsorted-required-namespaces
+  {:level :warning}}}
