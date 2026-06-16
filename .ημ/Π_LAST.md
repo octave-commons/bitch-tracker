@@ -4,7 +4,7 @@
 **Branch:** `pi/fork-tax/20260529T022118Z-main-softreset-all-dirt-bitch-tracker`  
 **Timestamp:** 2026-06-16T13:02:47Z  
 **Parent commits:** `5c5981f` (CodeRabbit fixes), `dc943e4` (eta-mu-sol domain/shape/law refactor)  
-**Merge commit:** pending
+**Merge commit:** `a7240d71d4e9c6566672b1618beb31376e8cbf01`
 
 ## What changed
 

@@ -4,7 +4,7 @@
   (tag "pi/fork-tax/20260616T130247Z/bitch-tracker-coderabbit-merged")
   (timestamp "2026-06-16T13:02:47Z")
   (parent-commits ("5c5981f" "dc943e4"))
-  (merge-commit "pending")
+  (merge-commit "a7240d71d4e9c6566672b1618beb31376e8cbf01")
   (verification
     (clj-kondo "0 errors, 0 warnings")
     (shadow-cljs-test "17 tests, 62 assertions, 0 failures, 0 errors")
