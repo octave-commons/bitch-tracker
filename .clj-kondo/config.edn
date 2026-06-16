@@ -1,3 +1,17 @@
 {:linters
- {:unresolved-symbol
-  {:exclude [await]}}}
+ {:missing-docstring          {:level :warning}
+  :unused-value               {:level :warning}
+  :shadowed-var               {:level :warning}
+  :used-underscored-binding   {:level :warning}
+  :warn-on-reflection         {:level :warning}
+  :unsorted-required-namespaces {:level :warning}
+  :refer                      {:level :warning
+                               :exclude {clojure.test [deftest is testing are run-tests]
+                                         cljs.test    [deftest is testing are run-tests]}}}
+ :ns-groups
+ [{:name bitch-tracker.domain
+   :pattern "bitch-tracker\\.domain\\..*"
+   :config {:linters {:no-arg {:level :error}}}}
+  {:name bitch-tracker.shape
+   :pattern "bitch-tracker\\.shape\\..*"
+   :config {:linters {:no-arg {:level :error}}}}]}
