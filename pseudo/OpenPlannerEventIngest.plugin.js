@@ -48,13 +48,14 @@ module.exports = class OpenPlannerEventIngest {
     this._seen = new Set();
     this._flushTimer = null;
     this._retryTimer = null;
+    this._flushInProgress = false;
     this._boundMessageCreate = this._onMessageCreate.bind(this);
     this._boundReactionAdd = this._onReactionAdd.bind(this);
     this._boundReactionRemove = this._onReactionRemove.bind(this);
     this._bitchCounts = new Map(); // userId -> count
-    this._bitchMessages = new Map(); // userId -> Set<messageId>
-    this._labeledMessages = new Set(); // messageIds that have been labeled as bitch
-    this._pendingSemanticQueries = new Set(); // messageIds waiting for embedding before semantic query
+    this._bitchMessages = new Map(); // userId -> Map<messageId, Set<labelerId>>
+    this._labeledMessages = new Set(); // messageIds that currently have at least one label
+    this._pendingSemanticQueries = new Map(); // messageId -> { guildId, channelId, messageId }
     this._semanticScanTimer = null;
     this._loadBitchState();
   }
@@ -257,30 +258,42 @@ module.exports = class OpenPlannerEventIngest {
     const authorId = String(message.author?.id ?? "");
     if (!authorId) return;
 
-    // Track this message as labeled
+    // Per-message labeler tracking: count transitions 0->1 and 1->0 only.
     if (!this._bitchMessages.has(authorId)) {
-      this._bitchMessages.set(authorId, new Set());
+      this._bitchMessages.set(authorId, new Map());
     }
-    this._bitchMessages.get(authorId).add(messageId);
+    const authorMessages = this._bitchMessages.get(authorId);
+    if (!authorMessages.has(messageId)) {
+      authorMessages.set(messageId, new Set());
+    }
+    const labelers = authorMessages.get(messageId);
+
+    if (labelers.has(reactorUserId)) return; // duplicate label from same user
+    labelers.add(reactorUserId);
+
+    const firstLabel = !this._labeledMessages.has(messageId);
     this._labeledMessages.add(messageId);
 
-    // Increment bitch count
-    const currentCount = this._bitchCounts.get(authorId) ?? 0;
-    const newCount = currentCount + 1;
-    this._bitchCounts.set(authorId, newCount);
-
-    console.log(`[Bitch Classifier] User ${authorId} now has ${newCount} bitch label(s)`);
+    if (firstLabel) {
+      const currentCount = this._bitchCounts.get(authorId) ?? 0;
+      const newCount = currentCount + 1;
+      this._bitchCounts.set(authorId, newCount);
+      console.log(`[Bitch Classifier] User ${authorId} now has ${newCount} moderation label(s)`);
+    }
 
     // Send message to bitch tracker
-    this._sendToBitchTracker(message, this._channelStore?.getChannel?.(channelId), null, "poodle-labeled");
+    const channel = this._channelStore?.getChannel?.(channelId);
+    const guildId = String(message.guild_id ?? channel?.guild_id ?? channel?.getGuildId?.() ?? "");
+    this._sendToBitchTracker(message, channel, guildId, "poodle-labeled");
 
     // If threshold reached, tag user as bitch
-    if (newCount >= CONFIG.bitchThreshold && currentCount < CONFIG.bitchThreshold) {
+    const currentCount = this._bitchCounts.get(authorId) ?? 0;
+    if (currentCount >= CONFIG.bitchThreshold && (currentCount - 1) < CONFIG.bitchThreshold) {
       this._tagUserAsBitch(authorId, message);
     }
 
     // Queue for semantic similarity scan once embedded
-    this._pendingSemanticQueries.add(messageId);
+    this._pendingSemanticQueries.set(messageId, { guildId, channelId, messageId });
 
     // Also immediately try semantic search on the message content
     if (message.content) {
@@ -309,18 +322,24 @@ module.exports = class OpenPlannerEventIngest {
     const authorId = String(message.author?.id ?? "");
     if (!authorId || !this._labeledMessages.has(messageId)) return;
 
-    // Remove from tracking
-    this._labeledMessages.delete(messageId);
-    if (this._bitchMessages.has(authorId)) {
-      this._bitchMessages.get(authorId).delete(messageId);
-    }
+    const authorMessages = this._bitchMessages.get(authorId);
+    if (!authorMessages) return;
 
-    // Decrement count
-    const currentCount = this._bitchCounts.get(authorId) ?? 0;
-    if (currentCount > 0) {
-      const newCount = currentCount - 1;
-      this._bitchCounts.set(authorId, newCount);
-      console.log(`[Bitch Classifier] User ${authorId} now has ${newCount} bitch label(s) (removed)`);
+    const labelers = authorMessages.get(messageId);
+    if (!labelers) return;
+
+    labelers.delete(reactorUserId);
+
+    if (labelers.size === 0) {
+      this._labeledMessages.delete(messageId);
+      authorMessages.delete(messageId);
+
+      const currentCount = this._bitchCounts.get(authorId) ?? 0;
+      if (currentCount > 0) {
+        const newCount = currentCount - 1;
+        this._bitchCounts.set(authorId, newCount);
+        console.log(`[Bitch Classifier] User ${authorId} now has ${newCount} moderation label(s) (removed)`);
+      }
     }
 
     this._persistBitchState();
@@ -775,8 +794,8 @@ module.exports = class OpenPlannerEventIngest {
     if (!apiKey || !baseUrl) return;
 
     // Check which messages now have embeddings
-    const toCheck = Array.from(this._pendingSemanticQueries).slice(0, 10);
-    const eventIds = toCheck.map(id => `discord:discord.message:${id}`);
+    const toCheck = Array.from(this._pendingSemanticQueries.entries()).slice(0, 10);
+    const eventIds = toCheck.map(([_messageId, locator]) => `discord:discord.message:${locator.messageId}`);
 
     try {
       const res = await fetch(`${baseUrl}/v1/graph/node-embeddings/query`, {
@@ -793,24 +812,21 @@ module.exports = class OpenPlannerEventIngest {
       const data = await res.json();
       const embeddedIds = new Set((data.vectors || []).map(v => v.sourceEventId || v.id));
 
-      for (const messageId of toCheck) {
-        const eventId = `discord:discord.message:${messageId}`;
+      for (const [messageId, locator] of toCheck) {
+        const eventId = `discord:discord.message:${locator.messageId}`;
         if (embeddedIds.has(eventId)) {
           this._pendingSemanticQueries.delete(messageId);
-          // Find the original message and run semantic search
-          for (const [userId, messageSet] of this._bitchMessages) {
-            if (messageSet.has(messageId)) {
-              const channelId = this._findChannelIdForMessage(messageId);
-              if (channelId) {
-                const message = this._messageStore?.getMessage?.(channelId, messageId);
-                if (message?.content) {
-                  const similar = await this._querySemanticSimilar(message.content, 5);
-                  if (similar.length > 0) {
-                    this._sendSimilarMessagesToWatch(userId, message, similar);
-                  }
-                }
+          if (!this._labeledMessages.has(messageId)) continue;
+
+          const message = this._messageStore?.getMessage?.(locator.channelId, locator.messageId)
+            ?? this._messageStore?.getMessage?.(this._findChannelIdForMessage(messageId), messageId);
+          if (message?.content) {
+            const authorId = String(message.author?.id ?? "");
+            if (authorId) {
+              const similar = await this._querySemanticSimilar(message.content, 5);
+              if (similar.length > 0) {
+                this._sendSimilarMessagesToWatch(authorId, message, similar);
               }
-              break;
             }
           }
         }
@@ -821,13 +837,26 @@ module.exports = class OpenPlannerEventIngest {
   }
 
   _findChannelIdForMessage(messageId) {
-    // Search through all channels we know about
-    const channels = this._channelStore?.getMutablePrivateChannels?.() || [];
-    for (const channel of Object.values(channels)) {
+    // Search DM channels first, then guild channels.
+    const privateChannels = this._channelStore?.getMutablePrivateChannels?.() || [];
+    for (const channel of Object.values(privateChannels)) {
       if (this._messageStore?.getMessage?.(channel.id, messageId)) {
         return channel.id;
       }
     }
+
+    const guilds = this._guildStore?.getGuilds?.() || {};
+    for (const guildId of Object.keys(guilds)) {
+      const guildChannels = this._channelStore?.getMutableGuildChannelsForGuild?.(guildId);
+      if (guildChannels) {
+        for (const channel of Object.values(guildChannels)) {
+          if (this._messageStore?.getMessage?.(channel.id, messageId)) {
+            return channel.id;
+          }
+        }
+      }
+    }
+
     return null;
   }
 
@@ -879,56 +908,8 @@ module.exports = class OpenPlannerEventIngest {
 
   _handleQualityReaction(messageId, channelId, userId, emoji, quality) {
     console.log(`[Quality Label] Message ${messageId} labeled as ${quality} by ${userId}`);
-
-    const message = this._messageStore?.getMessage?.(channelId, messageId);
-    if (!message) return;
-
-    // Create a weak-reaction quality event
-    const channel = this._channelStore?.getChannel?.(channelId);
-    const guildId = String(message.guild_id ?? channel?.guild_id ?? channel?.getGuildId?.() ?? "");
-
-    const event = {
-      schema: "openplanner.event.v1",
-      schema_version: 1,
-      id: `discord:quality:${channelId}:${messageId}:${emoji}`,
-      ts: new Date().toISOString(),
-      source: "betterdiscord-openplanner",
-      kind: "discord.reaction",
-      source_ref: {
-        project: this._setting("project", CONFIG.defaultProject),
-        session: channelId,
-        message: messageId,
-      },
-      text: `Quality label: ${quality}`,
-      meta: {
-        author: userId,
-        author_id: userId,
-        tags: ["discord", "reaction", "quality-label"],
-      },
-      extra: {
-        guild_id: guildId,
-        channel_id: channelId,
-        message_id: messageId,
-        reaction_emoji: emoji,
-        reaction_user_id: userId,
-        quality,
-        openplanner_labels: {
-          claim_system: "weak-reaction-v1",
-          reaction_emojis: [emoji],
-          labels: [`quality:${quality}`],
-          quality,
-          explicit_meaning: quality === "good" ? "good output" : "bad output",
-          updated_at: new Date().toISOString(),
-        },
-      },
-    };
-
-    if (!this._seen.has(event.id)) {
-      this._seen.add(event.id);
-      this._queue.push(event);
-      this._persistQueue();
-      if (this._queue.length >= CONFIG.maxBatchSize) void this._flush();
-    }
+    // Quality metadata is already captured by _reactionToEvent in _onReactionAdd.
+    // Do not enqueue a separate event here to avoid duplicates.
   }
 
   // ── Event Builders ────────────────────────────────────────────────────────
@@ -960,7 +941,7 @@ module.exports = class OpenPlannerEventIngest {
     const ts = new Date(message.timestamp ?? message.timestamp?._i ?? Date.now()).toISOString();
     const moderationHits = this._moderationHits(content);
     const labels = [];
-    if (CONFIG.knownBitchUserIds.has(authorId)) labels.push("bitch-watch:known-user", `bitch-watch:user:${authorId}`);
+    if (CONFIG.knownBitchUserIds.has(authorId)) labels.push("moderation-watch:known-user", `moderation-watch:user:${authorId}`);
     if (moderationHits.length > 0) labels.push("moderation-watch:term", ...moderationHits.map(hit => `moderation-watch:${hit}`));
 
     const event = {
@@ -1012,11 +993,11 @@ module.exports = class OpenPlannerEventIngest {
       };
     }
 
-    // If user is a known bitch, add bitch label
+    // If user is a known watch user, add moderation watch tags
     if (CONFIG.knownBitchUserIds.has(authorId)) {
-      event.meta.tags.push("known-bitch");
-      event.meta.tags.push("bitch-watch");
-      event.extra.is_known_bitch = true;
+      event.meta.tags.push("known-watch-user");
+      event.meta.tags.push("moderation-watch");
+      event.extra.is_known_watch_user = true;
     }
 
     if (moderationHits.length > 0) {
@@ -1080,9 +1061,9 @@ module.exports = class OpenPlannerEventIngest {
     }
 
     if (this._isBitchEmoji(emoji)) {
-      event.meta.tags.push("bitch-label", "poodle-label");
+      event.meta.tags.push("moderation-label", "poodle-label");
       event.extra.openplanner_labels.claim_system = "discord-moderation-watch-v1";
-      event.extra.openplanner_labels.labels.push("bitch:poodle", "bitch-watch:poodle-label");
+      event.extra.openplanner_labels.labels.push("moderation:poodle", "moderation-watch:poodle-label");
     }
 
     return event;
@@ -1091,11 +1072,15 @@ module.exports = class OpenPlannerEventIngest {
   // ── Persistence ───────────────────────────────────────────────────────────
 
   _persistBitchState() {
+    const messages = Array.from(this._bitchMessages.entries()).map(([authorId, messageMap]) => [
+      authorId,
+      Array.from(messageMap.entries()).map(([messageId, labelers]) => [messageId, Array.from(labelers)]),
+    ]);
     const state = {
       counts: Array.from(this._bitchCounts.entries()),
-      messages: Array.from(this._bitchMessages.entries()).map(([k, v]) => [k, Array.from(v)]),
+      messages,
       labeled: Array.from(this._labeledMessages),
-      pendingSemantic: Array.from(this._pendingSemanticQueries),
+      pendingSemantic: Array.from(this._pendingSemanticQueries.entries()),
     };
     BdApi.Data.save("OpenPlannerEventIngest", "bitchState", state);
   }
@@ -1105,24 +1090,29 @@ module.exports = class OpenPlannerEventIngest {
     if (state) {
       if (state.counts) this._bitchCounts = new Map(state.counts);
       if (state.messages) {
-        this._bitchMessages = new Map(state.messages.map(([k, v]) => [k, new Set(v)]));
+        this._bitchMessages = new Map(state.messages.map(([authorId, messageList]) => [
+          authorId,
+          new Map(messageList.map(([messageId, labelers]) => [messageId, new Set(labelers)])),
+        ]));
       }
       if (state.labeled) this._labeledMessages = new Set(state.labeled);
-      if (state.pendingSemantic) this._pendingSemanticQueries = new Set(state.pendingSemantic);
+      if (state.pendingSemantic) this._pendingSemanticQueries = new Map(state.pendingSemantic);
     }
   }
 
   // ── OpenPlanner Flush ─────────────────────────────────────────────────────
 
   async _flush() {
+    if (this._flushInProgress) return;
     if (!this._queue.length) return;
 
     const endpoint = this._endpoint();
     const apiKey = this._apiKey();
     if (!endpoint || !apiKey) return;
 
-    const batch = this._queue.slice(0, CONFIG.maxBatchSize);
+    this._flushInProgress = true;
     try {
+      const batch = this._queue.slice(0, CONFIG.maxBatchSize);
       const res = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -1139,6 +1129,8 @@ module.exports = class OpenPlannerEventIngest {
       console.log(`[OpenPlanner Event Ingest] Sent ${batch.length} event(s)`);
     } catch (err) {
       console.warn("[OpenPlanner Event Ingest] Flush failed; will retry", err);
+    } finally {
+      this._flushInProgress = false;
     }
   }
 
@@ -1255,18 +1247,7 @@ module.exports = class OpenPlannerEventIngest {
   }
 
   _env(name) {
-    const fromProcess = globalThis.process?.env?.[name];
-    if (fromProcess) return fromProcess;
-
-    for (const file of [
-      "/home/err/devel/services/openplanner/.env",
-      "/home/err/devel/orgs/open-hax/openplanner/.env",
-    ]) {
-      const value = this._envFileValue(file, name);
-      if (value) return value;
-    }
-
-    return "";
+    return globalThis.process?.env?.[name] ?? "";
   }
 
   _envFileValue(file, name) {

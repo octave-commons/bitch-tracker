@@ -2,7 +2,10 @@
   "Pure deduplication logic over a TTL cache map.
   I/O (persistence to disk) lives in bot.dedup-store.")
 
-(defn empty-cache [] {})
+(defn empty-cache
+  "Returns an empty deduplication cache."
+  []
+  {})
 
 (defn seen?
   "Returns true when id exists in the cache and has not expired."

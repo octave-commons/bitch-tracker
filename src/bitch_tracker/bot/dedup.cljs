@@ -1,7 +1,9 @@
 (ns bitch-tracker.bot.dedup
   (:require [bitch-tracker.shared.util :as u]))
 
-(defn make-state []
+(defn make-state
+  "Returns a fresh deduplication state object."
+  []
   #js {:cache (js/Map.)
        :hits 0
        :misses 0})
@@ -26,10 +28,14 @@
           (.delete cache (aget (aget entries i) 0)))
         true))))
 
-(defn seen? [^js state id]
+(defn seen?
+  "Returns true if id is present in the dedup cache."
+  [^js state id]
   (.has (.-cache state) id))
 
-(defn add! [^js state id max-age-ms max-size]
+(defn add!
+  "Adds id to the cache, pruning old and excess entries. Returns true for a new id, false for a cache hit."
+  [^js state id max-age-ms max-size]
   (prune-by-age! state max-age-ms)
   (let [cache (.-cache state)]
     (if (.has cache id)
@@ -40,16 +46,22 @@
           (prune-by-size! state max-size)
           true))))
 
-(defn stats [^js state]
+(defn stats
+  "Returns an object with the cache size, hits and misses."
+  [^js state]
   #js {:size (.-size (.-cache state))
        :hits (.-hits state)
        :misses (.-misses state)})
 
-(defn persist-path []
+(defn persist-path
+  "Returns the default filesystem path for the dedup cache file."
+  []
   (let [path (js/require "path")]
     (.join path ((.-cwd js/process)) "dedup-cache.json")))
 
-(defn persist! [^js state path]
+(defn persist!
+  "Writes the current cache entries to path as JSON."
+  [^js state path]
   (try
     (let [fs (js/require "fs")
           entries (js/Array.from (.-cache state))
@@ -58,7 +70,9 @@
     (catch :default err
       (js/console.warn "[dedup] persist failed" (.-message err)))))
 
-(defn load! [^js state path]
+(defn load!
+  "Loads cache entries from path into state if the file exists."
+  [^js state path]
   (try
     (let [fs (js/require "fs")]
       (when (.existsSync fs path)

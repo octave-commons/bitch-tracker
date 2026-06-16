@@ -1,10 +1,14 @@
 (ns bitch-tracker.bot.discord
-  (:require [clojure.string :as str]
-            [bitch-tracker.shared.util :as u]))
+  (:require [bitch-tracker.shared.util :as u]
+            [clojure.string :as str]))
 
-(def ^js discord (js/require "discord.js"))
+(def ^js discord
+  "The discord.js module."
+  (js/require "discord.js"))
 
-(defn create-client [token]
+(defn create-client
+  "Creates and logs in a Discord client, returning a promise that resolves to the client."
+  [token]
   (let [^js client (new (.-Client discord)
                         #js {:intents #js [(aget (.-GatewayIntentBits discord) "Guilds")]})]
     (-> (.login client token)
@@ -14,7 +18,9 @@
                                  (str "(" (.-id (.-user client)) ")"))
                  client)))))
 
-(defn send-message! [^js client channel-id content]
+(defn send-message!
+  "Sends content to channel-id as one or more chunks, returning a promise of sent messages."
+  [^js client channel-id content]
   (let [chunks (u/discord-message-chunks content)]
     (-> (.fetch (.-channels client) channel-id)
         (.then (fn [^js channel]
@@ -36,7 +42,9 @@
                   (js/console.error "[discord] Channel fetch failed:" (.-message err))
                   (js/Promise.resolve []))))))
 
-(defn send-embed! [^js client channel-id embed-data]
+(defn send-embed!
+  "Sends embed-data as an embed to channel-id."
+  [^js client channel-id embed-data]
   (-> (.fetch (.-channels client) channel-id)
       (.then (fn [^js channel]
                (when channel
@@ -44,7 +52,9 @@
       (.catch (fn [err]
                 (js/console.error "[discord] Embed send failed:" (.-message err))))))
 
-(defn highlight-matches [content matches]
+(defn highlight-matches
+  "Wraps regex match substrings in content with Discord bold markers."
+  [content matches]
   (let [text (str content)
         sorted (sort-by :index #(compare %2 %1) matches)]
     (reduce (fn [acc {:keys [index matched]}]
@@ -58,7 +68,9 @@
             text
             sorted)))
 
-(defn format-tracker-message [message channel guild-id guild-name reason & [matches]]
+(defn format-tracker-message
+  "Builds a Discord message string describing moderation activity."
+  [message channel guild-id guild-name reason & [matches]]
   (let [^js author (u/jget message "author")
         aid (or (u/jget author "id") (u/jget message "author_id") "")
         content (or (u/jget message "content") "")
@@ -83,25 +95,29 @@
                             (str "**Link:** " link)]
                      match-details (conj match-details)))))
 
-(defn format-watch-message [user-id author-name count triggering-message]
+(defn format-watch-message
+  "Builds a watch alert for a user crossing the reaction-label threshold."
+  [user-id author-name label-count triggering-message]
   (str/join "\n" ["🐩 **Moderation Watch Alert**"
                    (str "User **" author-name "** (" user-id ") reached the reaction-label threshold.")
-                   (str "Total poodle/clown labels: " count)
+                   (str "Total poodle/clown labels: " label-count)
                    (str "Message timestamp: " (u/discord-timestamp (or (u/jget triggering-message "timestamp") (u/jget triggering-message "timestamp" "_i"))))
                    (str "Detected: " (u/discord-timestamp (.getTime (js/Date.))))
                    (str "Triggering message: " (u/sanitize-mentions (subs (str (or (u/jget triggering-message "content") "")) 0 (min 200 (count (str (or (u/jget triggering-message "content") "")))))))
                    "This user will be monitored for similar behavior patterns."]))
 
-(defn format-similar-watch-message [user-id source-message similar-hits]
+(defn format-similar-watch-message
+  "Builds a semantic similarity alert for a watched message."
+  [user-id source-message similar-hits]
   (let [^js author (u/jget source-message "author")
         author-name (u/sanitize-mentions (or (u/jget author "username") (u/jget author "globalName") "Unknown"))
         lines (map-indexed
                (fn [idx hit]
-                 (let [^js meta (or (u/jget hit "metadata") #js {})
+                 (let [^js hit-meta (or (u/jget hit "metadata") #js {})
                        distance (or (u/jget hit "distance") 0)
                        similarity (.toFixed (- 1 distance) 3)
-                       text (u/sanitize-mentions (subs (str (or (u/jget hit "document") (u/jget meta "text") "")) 0 (min 150 (count (str (or (u/jget hit "document") (u/jget meta "text") ""))))))
-                       source (u/sanitize-mentions (or (u/jget meta "source") "unknown"))]
+                       text (u/sanitize-mentions (subs (str (or (u/jget hit "document") (u/jget hit-meta "text") "")) 0 (min 150 (count (str (or (u/jget hit "document") (u/jget hit-meta "text") ""))))))
+                       source (u/sanitize-mentions (or (u/jget hit-meta "source") "unknown"))]
                    (str (inc idx) ". [sim:" similarity "] " text " (source: " source ")")))
                (array-seq similar-hits))]
     (str/join "\n" (concat ["🔍 **Semantic Similarity Alert**"
@@ -111,7 +127,9 @@
                             (str "**Top " (count similar-hits) " similar messages:**")]
                            lines))))
 
-(defn format-status-message [{:keys [status user-id username hostname socket-id slapper-role-id]}]
+(defn format-status-message
+  "Builds a status message for bot or plugin lifecycle events."
+  [{:keys [status user-id username hostname socket-id slapper-role-id]}]
   (case status
     :bot-online
     (str "✅ **BitchTracker bot server is online**\n"
@@ -131,4 +149,4 @@
          "Socket ID: `" socket-id "`\n"
          "<@&" slapper-role-id ">, a slapper has disconnected.")
 
-    (str "ℹ️ BitchTracker status update")))
+    "ℹ️ BitchTracker status update"))

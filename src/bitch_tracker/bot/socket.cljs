@@ -1,15 +1,19 @@
 (ns bitch-tracker.bot.socket
-  (:require [clojure.string :as str]
-            [bitch-tracker.shared.util :as u]
-            [bitch-tracker.shared.socket-protocol :as proto]
+  (:require [bitch-tracker.bot.config :as cfg]
             [bitch-tracker.bot.dedup :as dedup]
             [bitch-tracker.bot.discord :as discord]
             [bitch-tracker.bot.openplanner :as op]
-            [bitch-tracker.bot.config :as cfg]))
+            [bitch-tracker.shape.protocol :as proto]
+            [bitch-tracker.shared.util :as u]
+            [clojure.string :as str]))
 
-(def ^js socket-io (js/require "socket.io"))
+(def ^js socket-io
+  "The socket.io server constructor."
+  (js/require "socket.io"))
 
-(defn make-state []
+(defn make-state
+  "Returns a fresh bot socket server state object."
+  []
   #js {"label_reactors" (js/Map.)
        "io" nil
        "discord_client" nil
@@ -28,28 +32,30 @@
   (str user-id "\u0000" message-id))
 
 (defn- add-label-reactor! [^js state user-id message-id reactor-id]
-  (let [key (label-key user-id message-id)
-        reactors (or (.get (.-label-reactors state) key) (js/Set.))]
+  (let [k (label-key user-id message-id)
+        reactors (or (.get (.-label_reactors state) k) (js/Set.))]
     (when (= 0 (.-size reactors))
-      (.set (.-label-reactors state) key reactors))
+      (.set (.-label_reactors state) k reactors))
     (when-not (.has reactors reactor-id)
       (.add reactors reactor-id)
       true)))
 
 (defn- remove-label-reactor! [^js state user-id message-id reactor-id]
-  (let [key (label-key user-id message-id)
-        reactors (.get (.-label-reactors state) key)]
+  (let [k (label-key user-id message-id)
+        reactors (.get (.-label_reactors state) k)]
     (when reactors
       (.delete reactors reactor-id)
       (= 0 (.-size reactors)))))
 
-(defn label-count [^js state user-id]
-  (let [reactors-map (.-label-reactors state)
+(defn label-count
+  "Returns the number of distinct label reactions for user-id."
+  [^js state user-id]
+  (let [reactors-map (.-label_reactors state)
         total (atom 0)]
     (doseq [entry (array-seq (js/Array.from (.entries reactors-map)))]
-      (let [key (aget entry 0)
+      (let [entry-key (aget entry 0)
             reactors (aget entry 1)]
-        (when (str/starts-with? key (str user-id "\u0000"))
+        (when (str/starts-with? entry-key (str user-id "\u0000"))
           (swap! total + (.-size reactors)))))
     @total))
 
@@ -86,14 +92,16 @@
 (defn- dedup-ttl-ms [_config]
   (* 1000 60 60 24)) ;; 24 hours
 
-(defn- dedup-max-size [_config]
-  (or (:dedup-max-size _config) 50000))
+(defn- dedup-max-size [config]
+  (or (:dedup-max-size config) 50000))
 
-(defn handle-incoming-event! [^js state event]
-  (let [^js op-state (.-op-state state)
+(defn handle-incoming-event!
+  "Routes an incoming plugin event to OpenPlanner and tracker channels."
+  [^js state event]
+  (let [^js op-state (.-op_state state)
         config (.-config state)
-        ^js discord-client (.-discord-client state)
-        ^js dedup-state (.-dedup-state state)]
+        ^js discord-client (.-discord_client state)
+        ^js dedup-state (.-dedup_state state)]
     (when (and event dedup-state)
       (when (dedup/add! dedup-state (event-id event) (dedup-ttl-ms config) (dedup-max-size config))
         (when (and op-state config)
@@ -128,7 +136,9 @@
                                          (:tracker-channel-id config)
                                          (discord/format-tracker-message message channel guild-id guild-name reason hits)))))))))))
 
-(defn handle-label-added! [^js state data]
+(defn handle-label-added!
+  "Records a label reaction and forwards threshold alerts."
+  [^js state data]
   (let [user-id (str (u/jget data "userId"))
         message-id (str (u/jget data "messageId"))
         reactor-id (str (or (u/jget data "reactorId") "unknown"))
@@ -136,7 +146,7 @@
         channel (u/jget data "channel")
         guild-id (str (u/jget data "guildId"))
         config (.-config state)
-        ^js discord-client (.-discord-client state)
+        ^js discord-client (.-discord_client state)
         previous-count (label-count state user-id)
         added? (add-label-reactor! state user-id message-id reactor-id)
         current-count (label-count state user-id)]
@@ -159,7 +169,9 @@
                           :count current-count
                           :ts (u/now-iso)})))))
 
-(defn handle-label-removed! [^js state data]
+(defn handle-label-removed!
+  "Removes a label reaction for a message."
+  [^js state data]
   (let [user-id (str (u/jget data "userId"))
         message-id (str (u/jget data "messageId"))
         reactor-id (str (or (u/jget data "reactorId") "unknown"))]
@@ -178,9 +190,13 @@
            #js {:trackerChannelId (:tracker-channel-id config)
                 :watchChannelId (:watch-channel-id config)
                 :labelThreshold (:label-threshold config)
-                :botUserId (:bot-user-id config)})))
+                :botUserId (:bot-user-id config)
+                :guildIds (clj->js (:guild-ids config))
+                :knownLabelUserIds (clj->js (:known-label-user-ids config))})))
 
-(defn notify-bot-online! [^js state config]
+(defn notify-bot-online!
+  "Announces bot startup in the configured status channel."
+  [^js state config]
   (let [^js discord-client (.-discord_client state)
         channel-id (:plugin-status-channel-id config)
         ^js os (js/require "os")]
@@ -196,10 +212,10 @@
   (let [config (.-config state)
         ^js discord-client (.-discord_client state)
         channel-id (:plugin-status-channel-id config)
-        identity (when socket (.-plugin_identity ^js socket))
-        user-id (when identity (str (u/jget identity "user_id")))
-        username (when identity (str (u/jget identity "username")))
-        hostname (when identity (str (u/jget identity "hostname")))
+        plugin-identity (when socket (.-plugin_identity ^js socket))
+        user-id (when plugin-identity (str (u/jget plugin-identity "user_id")))
+        username (when plugin-identity (str (u/jget plugin-identity "username")))
+        hostname (when plugin-identity (str (u/jget plugin-identity "hostname")))
         socket-id (when socket (.-id socket))
         slapper-role-id (:slapper-of-bitches-role-id config)]
     (when (and discord-client channel-id)
@@ -214,7 +230,9 @@
          :socket-id socket-id
          :slapper-role-id slapper-role-id})))))
 
-(defn on-connection! [^js state ^js socket]
+(defn on-connection!
+  "Wires up event handlers for a new plugin socket connection."
+  [^js state ^js socket]
   (js/console.log "[socket] Plugin connected:" (.-id socket))
 
   (.on socket proto/event-to-bot
@@ -250,7 +268,9 @@
               :botUserId (:bot-user-id (.-config state))
               :ts (u/now-iso)}))
 
-(defn start! [^js state config]
+(defn start!
+  "Starts the socket.io server on the configured port."
+  [^js state config]
   (let [^js io (new (.-Server socket-io) #js {:cors #js {:origin "*"}})]
     (set! (.-io state) io)
     (set! (.-config state) config)
@@ -260,7 +280,9 @@
     (js/console.log "[socket] Socket.io server listening on port" (:socket-port config))
     state))
 
-(defn stop! [^js state]
+(defn stop!
+  "Stops the socket.io server and clears the state socket."
+  [^js state]
   (when-let [^js io (.-io state)]
     (.close io)
     (set! (.-io state) nil))

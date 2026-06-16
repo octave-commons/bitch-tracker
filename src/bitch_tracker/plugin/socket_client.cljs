@@ -7,74 +7,113 @@
 (defn make-state
   "Returns a fresh socket client state object."
   []
-  #js {:socket nil :connected false})
+  #js {:socket nil
+       :connected false
+       :user-info nil
+       :reconnect-timer nil
+       :bot-config nil
+       :on-watch-alert nil
+       :on-tracker-msg nil
+       :on-status nil})
 
 (defn- get-socket-io
-  "Resolves the socket.io-client constructor from the page environment."
+  "Resolves the socket.io-client constructor from the page environment.
+  Guards against environments where js/window is undefined (e.g. Node verify)."
   []
   (or (u/jget js/globalThis "io")
       (u/jget js/globalThis "SocketIO")
-      (u/jget js/window "io")))
+      (when (exists? js/window) (u/jget js/window "io"))))
+
+(defn- call-cb
+  "Invokes a callback stored on the JS state object, if present."
+  [state k data]
+  (when-let [cb (aget state k)]
+    (cb data)))
 
 (defn connect!
-  "Opens a socket.io connection to url with the given identity map and event callbacks."
-  [state url identity handlers]
+  "Opens a socket.io connection to url with the given user-info map and event callbacks."
+  [state url user-info handlers]
   (let [io-ctor (get-socket-io)]
     (when-not io-ctor
-      (js/console.warn "[socket-client] socket.io not found on window"))
+      (js/console.warn "[socket-client] socket.io not found on page"))
     (when io-ctor
-      (let [socket (.call io-ctor nil url #js {:transports #js ["websocket"] :auth identity})]
+      (let [^js socket (.call io-ctor nil url #js {:transports #js ["websocket"]})]
         (aset state "socket" socket)
-        (.on socket "connect"
+        (aset state "user-info" user-info)
+        (aset state "on-watch-alert" (:on-watch-alert handlers))
+        (aset state "on-tracker-msg" (:on-tracker-msg handlers))
+        (aset state "on-status" (:on-status handlers))
+        (.on ^js socket "connect"
              (fn []
                (aset state "connected" true)
-               (js/console.log "[socket-client] connected")))
-        (.on socket "disconnect"
+               (js/console.log "[socket-client] connected")
+               (.emit ^js socket proto/plugin-identify-to-bot (or user-info #js {}))
+               (call-cb state "on-status" #js {:status "connected"})))
+        (.on ^js socket "disconnect"
              (fn []
                (aset state "connected" false)
-               (js/console.log "[socket-client] disconnected")))
-        (.on socket proto/watch-alert-to-plugin
-             (fn [data] (when-let [cb (:on-watch-alert handlers)] (cb data))))
-        (.on socket proto/tracker-msg-to-plugin
-             (fn [data] (when-let [cb (:on-tracker-msg handlers)] (cb data))))
-        (.on socket proto/status-to-plugin
-             (fn [data] (when-let [cb (:on-status handlers)] (cb data))))
+               (js/console.log "[socket-client] disconnected")
+               (call-cb state "on-status" #js {:status "disconnected"})))
+        (.on ^js socket proto/watch-alert-to-plugin
+             (fn [data]
+               (js/console.log "[socket-client] watch alert received")
+               (call-cb state "on-watch-alert" data)))
+        (.on ^js socket proto/tracker-msg-to-plugin
+             (fn [data]
+               (call-cb state "on-tracker-msg" data)))
+        (.on ^js socket proto/status-to-plugin
+             (fn [data]
+               (call-cb state "on-status" data)))
+        (.on ^js socket proto/config-response-to-plugin
+             (fn [data]
+               (aset state "bot-config" data)
+               (js/console.log "[socket-client] bot config received" data)))
+        (.on ^js socket "connect_error"
+             (fn [err]
+               (js/console.warn "[socket-client] connection error:" (.-message err))))
         socket))))
 
-(defn disconnect!
-  "Closes the socket connection if one is open."
-  [state]
-  (when-let [socket (aget state "socket")]
-    (.disconnect socket)
-    (aset state "socket" nil)
-    (aset state "connected" false)))
+(defn emit!
+  "Emits event-name with data only when a socket exists and is connected."
+  [state event-name data]
+  (let [^js socket (aget state "socket")]
+    (when (and socket (aget state "connected"))
+      (.emit ^js socket event-name data))))
 
 (defn send-event!
   "Emits an OpenPlanner event to the bot."
   [state event]
-  (when-let [socket (aget state "socket")]
-    (.emit socket proto/event-to-bot event)))
+  (emit! state proto/event-to-bot event))
 
 (defn send-label-added!
   "Emits a label-added payload to the bot."
   [state data]
-  (when-let [socket (aget state "socket")]
-    (.emit socket proto/label-added-to-bot data)))
+  (emit! state proto/label-added-to-bot data))
 
 (defn send-label-removed!
   "Emits a label-removed payload to the bot."
   [state data]
-  (when-let [socket (aget state "socket")]
-    (.emit socket proto/label-removed-to-bot data)))
+  (emit! state proto/label-removed-to-bot data))
 
 (defn send-backfill!
   "Emits a backfill request to the bot."
   [state data]
-  (when-let [socket (aget state "socket")]
-    (.emit socket proto/backfill-to-bot data)))
+  (emit! state proto/backfill-to-bot data))
 
 (defn request-config!
   "Requests the current bot config from the bot."
   [state]
-  (when-let [socket (aget state "socket")]
-    (.emit socket proto/config-request-to-bot)))
+  (emit! state proto/config-request-to-bot #js {}))
+
+(defn bot-config
+  "Returns the cached bot config, or an empty JS object if none."
+  [state]
+  (or (aget state "bot-config") #js {}))
+
+(defn disconnect!
+  "Closes the socket connection if one is open."
+  [state]
+  (when-let [^js socket (aget state "socket")]
+    (.disconnect ^js socket)
+    (aset state "socket" nil)
+    (aset state "connected" false)))

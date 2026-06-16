@@ -11,13 +11,16 @@
 //  BetterDiscord meta (BD reads the JSDoc block above)
 // ─────────────────────────────────────────────────────────────
 
+// Pin the UXX package version used for CDN fallback. Update this to match the
+// version installed in your BetterDiscord environment.
+const UXX_VERSION = '1.0.0';
+
 const UXX_LOCAL_URLS = [
-  // Prefer the workspace package build: it is the live npm package source in this checkout.
-  'file:///home/err/devel/orgs/open-hax/uxx/dist/tokens/src/index.js',
-  // Fallback to the root workspace symlink/install when present.
-  'file:///home/err/devel/node_modules/.pnpm/node_modules/@open-hax/uxx/dist/tokens/src/index.js',
+  // Add repo-relative or package-manager-resolvable paths here if you build
+  // @open-hax/uxx locally, e.g.:
+  // 'file://./node_modules/@open-hax/uxx/dist/tokens/src/index.js',
 ];
-const UXX_CDN = 'https://esm.sh/@open-hax/uxx@latest/tokens';
+const UXX_CDN = `https://esm.sh/@open-hax/uxx@${UXX_VERSION}/tokens`;
 
 // ─────────────────────────────────────────────────────────────
 //  Discord → UXX variable mapping

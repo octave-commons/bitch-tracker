@@ -1,9 +1,11 @@
 (ns bitch-tracker.shared.events
-  (:require [clojure.string :as str]
-            [bitch-tracker.shared.constants :as c]
-            [bitch-tracker.shared.util :as u]))
+  (:require [bitch-tracker.shared.constants :as c]
+            [bitch-tracker.shared.util :as u]
+            [clojure.string :as str]))
 
-(defn author-id [message]
+(defn author-id
+  "Extract a string author id from a Discord message object."
+  [message]
   (let [author (u/jget message "author")]
     (str (or (when (or (string? author) (number? author)) author)
              (u/jget author "id")
@@ -13,18 +15,34 @@
              (u/jget message "user_id")
              ""))))
 
-(defn ids [value]
+(defn ids
+  "Return a vector of non-blank string ids from a Discord collection."
+  [value]
   (->> (u/js-values value)
        (map #(str (or (u/jget % "id") %)))
        (remove str/blank?)
        vec))
 
 (defn label-emoji?
+  "Return true if the emoji is a configured moderation label emoji."
   ([emoji] (label-emoji? emoji emoji))
   ([emoji-name emoji]
    (some #(or (= (str emoji-name) %) (= (str emoji) %)) [c/poodle-emoji c/clown-emoji])))
 
-(defn message-to-event [message channel guild-id]
+(defn- message-timestamp
+  "Return an ISO-8601 timestamp for a Discord message."
+  [message]
+  (let [ts (u/jget message "timestamp")
+        ts-internal (u/jget message "timestamp" "_i")
+        raw (if (some? ts) ts (if (some? ts-internal) ts-internal (.getTime (js/Date.))))
+        date (js/Date. raw)]
+    (if (js/isNaN (.getTime date))
+      (.toISOString (js/Date.))
+      (.toISOString date))))
+
+(defn message-to-event
+  "Convert a Discord message into an OpenPlanner event map."
+  [message channel guild-id known-label-user-ids]
   (let [author (or (u/jget message "author") #js {})
         aid (str (or (u/jget author "id") (u/jget message "author_id") "unknown"))
         content (if (string? (u/jget message "content")) (u/jget message "content") "")
@@ -45,9 +63,9 @@
                        :url (u/jget e "url")
                        :provider (u/jget e "provider" "name")})
                     (u/js-values (u/jget message "embeds")))
-        ts (.toISOString (js/Date. (or (u/jget message "timestamp") (u/jget message "timestamp" "_i") (.getTime (js/Date.)))))
+        ts (message-timestamp message)
         labels (cond-> []
-                 (contains? c/known-label-user-ids aid) (conj "moderation-watch:known-user" (str "moderation-watch:user:" aid)))]
+                 (contains? known-label-user-ids aid) (conj "moderation-watch:known-user" (str "moderation-watch:user:" aid)))]
     (clj->js {:schema "openplanner.event.v1"
               :schema_version 1
               :id (str "discord:" guild-id ":" (or (u/jget message "channel_id") (u/jget message "channelId")) ":" (u/jget message "id"))
@@ -67,7 +85,7 @@
                      :author_global_name (u/jget author "globalName")
                      :bot (boolean (u/jget author "bot"))
                      :tags (cond-> ["discord" "message"]
-                             (contains? c/known-label-user-ids aid) (into ["known-watch-user" "moderation-watch"]))}
+                             (contains? known-label-user-ids aid) (into ["known-watch-user" "moderation-watch"]))}
               :extra (cond-> {:guild_id guild-id
                                :channel_id (str (or (u/jget message "channel_id") (u/jget message "channelId")))
                                :channel_name (u/jget channel "name")
@@ -86,9 +104,11 @@
                        (seq labels) (assoc :openplanner_labels {:claim_system "discord-moderation-watch-v1"
                                                                  :labels (vec (distinct labels))
                                                                  :updated_at (u/now-iso)})
-                       (contains? c/known-label-user-ids aid) (assoc :is_known_watch_user true))})))
+                       (contains? known-label-user-ids aid) (assoc :is_known_watch_user true))})))
 
-(defn reaction-to-event [reaction _channel guild-id emoji user-id quality]
+(defn reaction-to-event
+  "Convert a Discord reaction into an OpenPlanner event map."
+  [reaction _channel guild-id emoji user-id quality]
   (let [message-id (str (or (u/jget reaction "messageId") ""))
         channel-id (str (or (u/jget reaction "channelId") ""))
         base-label (u/reaction-label emoji)

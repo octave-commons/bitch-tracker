@@ -1,8 +1,8 @@
 (ns bitch-tracker.bot.dedup-store
   "Persists and loads the dedup cache from filesystem.
   All I/O; delegates logic to domain.dedup."
-  (:require [bitch-tracker.domain.dedup :as dedup]
-            ["fs" :as fs]))
+  (:require ["fs" :as fs]
+            [bitch-tracker.domain.dedup :as dedup]))
 
 (defn load!
   "Reads the cache from cache-path, returning an empty cache on any error."
