@@ -4,30 +4,35 @@
 - **Branch:** `main`
 - **Head:** `7069471`
 - **Remote:** `origin` (`git@github.com:octave-commons/bitch-tracker.git`)
-- **Timestamp:** `2026-06-27T04:22:21Z`
-- **Session:** `e32aeca6-c6d8-4978-9f05-78421d51eea4`
+- **Timestamp:** `2026-06-27T04:25:25Z`
+- **Session:** `ce793a1b-6323-4030-a10a-9fbc838f68e2`
 - **Actor:** `fork-tax-actor`
 
 ## Stats
 
-- changed: 0
-- untracked: 4
+- changed: 6
+- untracked: 6
 - large_changed: 0
-- important_changed: 0
-- hours_since_tax: 0
+- important_changed: 6
+- hours_since_tax: 495148
 
 ## Staged for this Π snapshot
 
-- `.eta-mu`
 - `.ημ/Π_STATE.sexp`
 - `.ημ/Π_LAST.md`
+- `.clj-kondo/imports/babashka/fs/config.edn`
+- `.clj-kondo/imports/http-kit/http-kit/config.edn`
+- `.clj-kondo/imports/http-kit/http-kit/httpkit/with_channel.clj`
+- `.clj-kondo/imports/rewrite-clj/rewrite-clj/config.edn`
+- `.clj-kondo/imports/taoensso/encore/config.edn`
+- `.clj-kondo/imports/taoensso/encore/taoensso/encore_hooks.clj`
 
 ## Residual / concurrent dirt (left untouched)
 
-- `.clj-kondo/imports/` — clj-kondo generated import configs
+- `.eta-mu` — actor runtime symlink to `.ημ`
 - `.lsp/` — LSP cache
 - `discord.deb` — transient downloaded binary (2177816 bytes)
 
 ## Verification
 
-Skipped. Owned paths are project metadata and handoff artifacts; no modified source code required verification.
+Skipped. Owned paths are clj-kondo generated import configs and Π handoff artifacts; no modified project source code required verification.
