@@ -210,11 +210,11 @@
         channel-id (or (u/jget message "channel_id") (u/jget message "channelId"))]
     (when (and message-id channel-id (not= (u/jget message "state") "SENDING") (not= (u/jget message "type") 8))
       (let [channel (channel-for state channel-id)
-            guild-id (guild-id-for state message channel nil)
-            aid (events/author-id message)]
-        (when (and (contains? (bot-config-set state "guildIds") guild-id) (not= aid (current-user-id state)))
-          (when-let [socket-state (state-get state "socket-state")]
-            (socket/send-event! socket-state (events/message-to-event message channel guild-id (bot-config-set state "knownLabelUserIds")))))))))
+            guild-id (guild-id-for state message channel nil)]
+        ;; No self-filter: forward all authors, including the logged-in account.
+        ;; Loop-safe — the bot ignores events authored by its own bot-user-id.
+        (when-let [socket-state (state-get state "socket-state")]
+          (socket/send-event! socket-state (events/message-to-event message channel guild-id (bot-config-set state "knownLabelUserIds"))))))))
 
 (defn- handle-label-reaction! [state message-id channel-id reactor-user-id]
   (let [message (u/jcall (state-get state "messageStore") "getMessage" channel-id message-id)]
@@ -265,23 +265,20 @@
             emoji-id (str (or (u/jget payload "emoji" "id") ""))
             emoji (if (u/present-string? emoji-name) emoji-name emoji-id)
             user-id (str (or (u/jget payload "userId") ""))]
-        (when (contains? (bot-config-set state "guildIds") guild-id)
-          (when (events/label-emoji? emoji-name emoji)
-            (handle-label-reaction! state message-id channel-id user-id))
-          (when-let [socket-state (state-get state "socket-state")]
-            (socket/send-event! socket-state (events/reaction-to-event payload channel guild-id emoji user-id nil))))))))
+        (when (events/label-emoji? emoji-name emoji)
+          (handle-label-reaction! state message-id channel-id user-id))
+        (when-let [socket-state (state-get state "socket-state")]
+          (socket/send-event! socket-state (events/reaction-to-event payload channel guild-id emoji user-id nil)))))))
 
 (defn- on-reaction-remove! [state payload]
   (let [message-id (str (or (u/jget payload "messageId") ""))
         channel-id (str (or (u/jget payload "channelId") ""))]
     (when (and (u/present-string? message-id) (u/present-string? channel-id))
-      (let [channel (channel-for state channel-id)
-            guild-id (str (or (u/jget payload "guildId") (u/jget channel "guild_id") (u/jcall channel "getGuildId") ""))
-            emoji-name (str (or (u/jget payload "emoji" "name") ""))
+      (let [emoji-name (str (or (u/jget payload "emoji" "name") ""))
             emoji-id (str (or (u/jget payload "emoji" "id") ""))
             emoji (if (u/present-string? emoji-name) emoji-name emoji-id)
             user-id (str (or (u/jget payload "userId") ""))]
-        (when (and (contains? (bot-config-set state "guildIds") guild-id) (events/label-emoji? emoji-name emoji))
+        (when (events/label-emoji? emoji-name emoji)
           (handle-label-reaction-remove! state message-id channel-id user-id))))))
 
 ;; ─────────────────────────────────────────────────────────────
@@ -369,11 +366,11 @@
         (u/jcall dispatcher "subscribe" "MESSAGE_CREATE" (state-get state "boundMessageCreate"))
         (u/jcall dispatcher "subscribe" "MESSAGE_REACTION_ADD" (state-get state "boundReactionAdd"))
         (u/jcall dispatcher "subscribe" "MESSAGE_REACTION_REMOVE" (state-get state "boundReactionRemove")))))
-  (state-set! state "started" true)
-  (state-set! state "startedAt" (u/now-iso))
-  (state-set! state "stoppedAt" nil)
-  (log! "info" plugin-meta "started" (str "v" (meta-field plugin-meta "version" c/plugin-version)))
-  (toast! (str (meta-field plugin-meta "name" c/plugin-name) " started") "success")
+   (state-set! state "started" true)
+   (state-set! state "startedAt" (u/now-iso))
+   (state-set! state "stoppedAt" nil)
+   (log! "info" plugin-meta "started" (str "v" (meta-field plugin-meta "version" c/plugin-version)) "no-guild-filter")
+   (toast! (str (meta-field plugin-meta "name" c/plugin-name) " started") "success")
   state)
 
 (defn stop-plugin!

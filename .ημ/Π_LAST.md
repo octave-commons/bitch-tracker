@@ -1,27 +1,45 @@
 # Π Last Handoff — bitch-tracker
 
-**Tag:** `pi/fork-tax/20260616T130247Z/bitch-tracker-coderabbit-merged`  
+**Tag:** `pi/fork-tax/20260618T133300Z/bitch-tracker-simplification-pass`  
 **Branch:** `pi/fork-tax/20260529T022118Z-main-softreset-all-dirt-bitch-tracker`  
-**Timestamp:** 2026-06-16T13:02:47Z  
-**Parent commits:** `5c5981f` (CodeRabbit fixes), `dc943e4` (eta-mu-sol domain/shape/law refactor)  
-**Merge commit:** `a7240d71d4e9c6566672b1618beb31376e8cbf01`
+**Timestamp:** 2026-06-18T13:33:00Z  
+**Parent commit:** (previous Π)
 
 ## What changed
 
-Merged the eta-mu-sol architectural refactor (`domain` / `shape` / `bot` layers) with the CodeRabbit review fixes from PR #1.
+### Simplification pass: remove over-engineering, fix self-loop
 
-- Resolved merge conflicts in `src/bitch_tracker/bot/config.cljs` and `src/bitch_tracker/plugin/socket_client.cljs`.
-- Preserved CodeRabbit fixes: externalized guild/user IDs via config/env, `^:async` + `await` in `main.cljs`, flush in-flight guard in `openplanner.cljs`, timestamp NaN validation in `events.cljs`, `allowed_mentions` suppression in pseudo plugins, relative watchlist path, per-message labeler tracking, removed duplicate quality event, moderation namespace labels, esbuild output guard, no default API key fallback, JSONC trailing comma fix.
-- Cleaned the refactor's stricter clj-kondo config to zero warnings across all `src/` and `test/`.
-- Fixed Node verification crash by guarding `js/window` access in `plugin/socket_client.cljs`.
-- Removed tracked `.config` symlink and kept it ignored.
+**config.cljs**
+- Renamed `SOCKET_PORT` → `BITCH_TRACKER_SOCKET_PORT` with JSON fallback
+- Removed `slapper-of-bitches-role-id` config field (unused after role-based disconnect message removed)
+
+**dedup.cljs**
+- Simplified to pure in-memory cache (removed filesystem persistence)
+- Removed size-based pruning; TTL-only eviction on `seen?` calls
+- `persist!` and `load!` are now no-ops for compatibility
+
+**socket.cljs**
+- Added bot self-filter: `not= author-id bot-user-id` prevents the bot from processing its own forwarded events
+- Removed `slapper-role-id` from plugin disconnect status messages
+- Added watchlist entry count on startup
+
+**plugin.cljs**
+- Removed guild-id gate from message/reaction forwarding — all events flow through, bot-side handles filtering
+- This eliminates the "must configure guildIds in plugin" requirement
+
+**socket_client.cljs**
+- Direct `require ["socket.io-client"]` instead of runtime resolution from `js/window`/`js/globalThis`
+- Removes fragile page-global detection; works cleanly in both BD and Node verify contexts
+
+**discord.cljs**
+- Removed `slapper-role-id` from disconnect message template
 
 ## Verification
 
-- `pnpm run lint:clj` — 0 errors, 0 warnings
-- `pnpm run test:cljs` — 17 tests, 62 assertions, 0 failures
-- `pnpm run build` — plugin + bot release builds, bundle, BD export verify all passed
+- `pnpm run lint:clj` — 0 errors, 0 warnings ✓
 
-## Left out of this Π
+## Left out of this Π (untouched, not staged)
 
-None. All working-tree changes are staged in the merge commit.
+- `.error/` — generated error output
+- `dedup-cache.json` — runtime cache file (no longer used by code)
+- `check-channel.js`, `list-channels.js`, `test-live.js`, `test-no-selfblock.js`, `test-real-event.js`, `test-wait.js` — ad-hoc test/debug scripts

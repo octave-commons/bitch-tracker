@@ -1,8 +1,8 @@
 (ns bitch-tracker.plugin.socket-client
   "socket.io-client transport layer for the BetterDiscord plugin.
   All I/O; no domain policy."
-  (:require [bitch-tracker.shape.protocol :as proto]
-            [bitch-tracker.shape.support :as u]))
+  (:require ["socket.io-client" :as socket-io]
+            [bitch-tracker.shape.protocol :as proto]))
 
 (defn make-state
   "Returns a fresh socket client state object."
@@ -16,14 +16,6 @@
        :on-tracker-msg nil
        :on-status nil})
 
-(defn- get-socket-io
-  "Resolves the socket.io-client constructor from the page environment.
-  Guards against environments where js/window is undefined (e.g. Node verify)."
-  []
-  (or (u/jget js/globalThis "io")
-      (u/jget js/globalThis "SocketIO")
-      (when (exists? js/window) (u/jget js/window "io"))))
-
 (defn- call-cb
   "Invokes a callback stored on the JS state object, if present."
   [state k data]
@@ -33,45 +25,41 @@
 (defn connect!
   "Opens a socket.io connection to url with the given user-info map and event callbacks."
   [state url user-info handlers]
-  (let [io-ctor (get-socket-io)]
-    (when-not io-ctor
-      (js/console.warn "[socket-client] socket.io not found on page"))
-    (when io-ctor
-      (let [^js socket (.call io-ctor nil url #js {:transports #js ["websocket"]})]
-        (aset state "socket" socket)
-        (aset state "user-info" user-info)
-        (aset state "on-watch-alert" (:on-watch-alert handlers))
-        (aset state "on-tracker-msg" (:on-tracker-msg handlers))
-        (aset state "on-status" (:on-status handlers))
-        (.on ^js socket "connect"
-             (fn []
-               (aset state "connected" true)
-               (js/console.log "[socket-client] connected")
-               (.emit ^js socket proto/plugin-identify-to-bot (or user-info #js {}))
-               (call-cb state "on-status" #js {:status "connected"})))
-        (.on ^js socket "disconnect"
-             (fn []
-               (aset state "connected" false)
-               (js/console.log "[socket-client] disconnected")
-               (call-cb state "on-status" #js {:status "disconnected"})))
-        (.on ^js socket proto/watch-alert-to-plugin
-             (fn [data]
-               (js/console.log "[socket-client] watch alert received")
-               (call-cb state "on-watch-alert" data)))
-        (.on ^js socket proto/tracker-msg-to-plugin
-             (fn [data]
-               (call-cb state "on-tracker-msg" data)))
-        (.on ^js socket proto/status-to-plugin
-             (fn [data]
-               (call-cb state "on-status" data)))
-        (.on ^js socket proto/config-response-to-plugin
-             (fn [data]
-               (aset state "bot-config" data)
-               (js/console.log "[socket-client] bot config received" data)))
-        (.on ^js socket "connect_error"
-             (fn [err]
-               (js/console.warn "[socket-client] connection error:" (.-message err))))
-        socket))))
+  (let [^js socket (socket-io url #js {:transports #js ["websocket"]})]
+    (aset state "socket" socket)
+    (aset state "user-info" user-info)
+    (aset state "on-watch-alert" (:on-watch-alert handlers))
+    (aset state "on-tracker-msg" (:on-tracker-msg handlers))
+    (aset state "on-status" (:on-status handlers))
+    (.on ^js socket "connect"
+         (fn []
+           (aset state "connected" true)
+           (js/console.log "[socket-client] connected")
+           (.emit ^js socket proto/plugin-identify-to-bot (or user-info #js {}))
+           (call-cb state "on-status" #js {:status "connected"})))
+    (.on ^js socket "disconnect"
+         (fn []
+           (aset state "connected" false)
+           (js/console.log "[socket-client] disconnected")
+           (call-cb state "on-status" #js {:status "disconnected"})))
+    (.on ^js socket proto/watch-alert-to-plugin
+         (fn [data]
+           (js/console.log "[socket-client] watch alert received")
+           (call-cb state "on-watch-alert" data)))
+    (.on ^js socket proto/tracker-msg-to-plugin
+         (fn [data]
+           (call-cb state "on-tracker-msg" data)))
+    (.on ^js socket proto/status-to-plugin
+         (fn [data]
+           (call-cb state "on-status" data)))
+    (.on ^js socket proto/config-response-to-plugin
+         (fn [data]
+           (aset state "bot-config" data)
+           (js/console.log "[socket-client] bot config received" data)))
+    (.on ^js socket "connect_error"
+         (fn [err]
+           (js/console.warn "[socket-client] connection error:" (.-message err))))
+    socket))
 
 (defn emit!
   "Emits event-name with data only when a socket exists and is connected."

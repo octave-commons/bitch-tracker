@@ -101,7 +101,8 @@
   (let [^js op-state (.-op_state state)
         config (.-config state)
         ^js discord-client (.-discord_client state)
-        ^js dedup-state (.-dedup_state state)]
+        ^js dedup-state (.-dedup_state state)
+        bot-user-id (str (:bot-user-id config))]
     (when (and event dedup-state)
       (when (dedup/add! dedup-state (event-id event) (dedup-ttl-ms config) (dedup-max-size config))
         (when (and op-state config)
@@ -113,7 +114,7 @@
                 extra (u/jget event "extra")
                 is-known? (boolean (u/jget extra "is_known_watch_user"))
                 author-id (str (u/jget event "meta" "author_id"))]
-            (when (or (seq hits) is-known?)
+            (when (and (or (seq hits) is-known?) (not= author-id bot-user-id))
               (let [guild-id (str (u/jget extra "guild_id"))
                     channel-id (str (u/jget extra "channel_id"))
                     message-id (str (u/jget extra "message_id"))
@@ -128,9 +129,9 @@
                                                    :globalName (u/jget event "meta" "author_global_name")}
                                       :timestamp (u/jget event "ts")})
                     channel (clj->js {:id channel-id :name channel-name :guild_id guild-id})
-                     reason (if is-known?
-                              "known-watch-user"
-                              (str "moderation-watch: " (str/join ", " (map :label hits))))]
+                    reason (if is-known?
+                             "known-watch-user"
+                             (str "moderation-watch: " (str/join ", " (map :label hits))))]
                 (when (:tracker-channel-id config)
                   (discord/send-message! discord-client
                                          (:tracker-channel-id config)
@@ -216,8 +217,7 @@
         user-id (when plugin-identity (str (u/jget plugin-identity "user_id")))
         username (when plugin-identity (str (u/jget plugin-identity "username")))
         hostname (when plugin-identity (str (u/jget plugin-identity "hostname")))
-        socket-id (when socket (.-id socket))
-        slapper-role-id (:slapper-of-bitches-role-id config)]
+         socket-id (when socket (.-id socket))]
     (when (and discord-client channel-id)
       (discord/send-message!
        discord-client
@@ -227,8 +227,7 @@
          :user-id user-id
          :username username
          :hostname hostname
-         :socket-id socket-id
-         :slapper-role-id slapper-role-id})))))
+         :socket-id socket-id})))))
 
 (defn on-connection!
   "Wires up event handlers for a new plugin socket connection."
@@ -272,10 +271,13 @@
   "Starts the socket.io server on the configured port."
   [^js state config]
   (let [^js io (new (.-Server socket-io) #js {:cors #js {:origin "*"}})]
-    (set! (.-io state) io)
-    (set! (.-config state) config)
-    (set! (.-watchlist state) (cfg/load-watchlist))
-    (.on io "connection" (fn [^js socket] (on-connection! state socket)))
+  (set! (.-io state) io)
+  (set! (.-config state) config)
+  (let [watchlist (cfg/load-watchlist)
+        entries (cfg/watch-entries watchlist)]
+    (set! (.-watchlist state) watchlist)
+    (js/console.log "[socket] Loaded" (count entries) "watchlist entries"))
+  (.on io "connection" (fn [^js socket] (on-connection! state socket)))
     (.listen io (:socket-port config))
     (js/console.log "[socket] Socket.io server listening on port" (:socket-port config))
     state))

@@ -38,6 +38,7 @@
       (js/console.log "[bot] BitchTracker bot server started")
       (js/console.log "[bot] Socket.io port:" (:socket-port config))
       (js/console.log "[bot] Bot user ID:" (:bot-user-id config))
+      (js/console.log "[bot] Guilds:" (count (:guild-ids config)) "| Known users:" (count (:known-label-user-ids config)))
       (js/console.log "[bot] Dedup cache:" (.-size (.-cache dedup-state)) "entries"))
     (catch :default err
       (js/console.error "[bot] Failed to start:" (.-message err))

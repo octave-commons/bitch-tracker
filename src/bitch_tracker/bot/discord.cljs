@@ -129,7 +129,7 @@
 
 (defn format-status-message
   "Builds a status message for bot or plugin lifecycle events."
-  [{:keys [status user-id username hostname socket-id slapper-role-id]}]
+  [{:keys [status user-id username hostname socket-id]}]
   (case status
     :bot-online
     (str "✅ **BitchTracker bot server is online**\n"
@@ -146,7 +146,6 @@
     (str "🔴 **BitchTracker plugin client disconnected**\n"
          "User: <@" user-id "> (" username ")\n"
          "Hostname: `" hostname "`\n"
-         "Socket ID: `" socket-id "`\n"
-         "<@&" slapper-role-id ">, a slapper has disconnected.")
+         "Socket ID: `" socket-id "`")
 
     "ℹ️ BitchTracker status update"))
