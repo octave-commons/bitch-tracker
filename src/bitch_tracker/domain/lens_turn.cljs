@@ -32,8 +32,12 @@
   "Returns the Knoxx /api/knoxx/direct/start body for a resolved KnoxxLens ask.
   `context` is the result of lens-context/resolve-context."
   [{:keys [message conversation-id session-id run-id model channel context]}]
-  (let [items (:items context)]
-    (cond-> {:message (str message)
+  (let [items (:items context)
+        context-blocks (str/join "\n\n" (keep :text items))
+        composed-message (if (seq context-blocks)
+                           (str context-blocks "\n\n" message)
+                           (str message))]
+    (cond-> {:message composed-message
              :conversationId conversation-id
              :runId run-id
              :model model
