@@ -25,14 +25,18 @@
   (.has (.-cache state) id))
 
 (defn add!
-  "Adds id to the cache with the given TTL. Returns true for a new id, false for a cache hit."
-  [^js state id ttl-ms _max-size]
+  "Adds id to the cache with the given TTL and max-size cap. Returns true for a new id, false for a cache hit."
+  [^js state id ttl-ms max-size]
   (prune! state (or ttl-ms 300000))
   (let [cache (.-cache state)]
     (if (.has cache id)
       (do (set! (.-hits state) (inc (.-hits state)))
           false)
       (do (.set cache id (now-ms))
+          (when (and (number? max-size) (pos? max-size))
+            (while (> (.-size cache) max-size)
+              (when-let [oldest-key (.-value (.next (.keys cache)))]
+                (.delete cache oldest-key))))
           (set! (.-misses state) (inc (.-misses state)))
           true))))
 

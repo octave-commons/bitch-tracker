@@ -161,17 +161,37 @@
 ;; Discord event handlers
 ;; ─────────────────────────────────────────────────────────────
 
-(defn- on-message-create! [state payload]
-  (let [message (or (u/jget payload "message") payload)
-        message-id (u/jget message "id")
-        channel-id (or (u/jget message "channel_id") (u/jget message "channelId"))]
+(defn- forward-message! [state message fallback-channel-id historical?]
+  (let [message-id (u/jget message "id")
+        channel-id (or (u/jget message "channel_id") (u/jget message "channelId") fallback-channel-id)]
     (when (and message-id channel-id (not= (u/jget message "state") "SENDING") (not= (u/jget message "type") 8))
       (let [channel (channel-for state channel-id)
             guild-id (guild-id-for state message channel nil)]
         ;; No self-filter: forward all authors, including the logged-in account.
         ;; Loop-safe — the bot ignores events authored by its own bot-user-id.
         (when-let [socket-state (state-get state "socket-state")]
-          (socket/send-event! socket-state (events/message-to-event message channel guild-id (bot-config-set state "knownLabelUserIds"))))))))
+          (let [ev (events/message-to-event message channel guild-id (bot-config-set state "knownLabelUserIds"))]
+            (when (and historical? (u/jget ev "extra"))
+              (aset (u/jget ev "extra") "historical" true))
+            (socket/send-event! socket-state ev)))))))
+
+(defn- on-message-create! [state payload]
+  (let [message (or (u/jget payload "message") payload)]
+    (forward-message! state message nil false)))
+
+(defn- on-messages-loaded! [state payload]
+  (let [channel-id (or (u/jget payload "channelId") (u/jget payload "channel_id"))
+        messages (u/js-values (u/jget payload "messages"))]
+    (doseq [m messages]
+      (when m
+        (forward-message! state m channel-id true)))))
+
+(defn- on-channel-select! [state payload]
+  (when-let [channel-id (or (u/jget payload "channelId") (u/jget payload "channel_id"))]
+    (let [messages (u/js-values (u/jcall (state-get state "messageStore") "getMessages" channel-id))]
+      (doseq [m messages]
+        (when m
+          (forward-message! state m channel-id true))))))
 
 (defn- handle-label-reaction! [state message-id channel-id reactor-user-id]
   (let [message (u/jcall (state-get state "messageStore") "getMessage" channel-id message-id)]
@@ -318,9 +338,14 @@
       (log! "error" plugin-meta "Could not find Discord Dispatcher.subscribe; lifecycle started in degraded mode")
       (do
         (state-set! state "boundMessageCreate" #(on-message-create! state %))
+        (state-set! state "boundMessagesLoaded" #(on-messages-loaded! state %))
+        (state-set! state "boundChannelSelect" #(on-channel-select! state %))
         (state-set! state "boundReactionAdd" #(on-reaction-add! state %))
         (state-set! state "boundReactionRemove" #(on-reaction-remove! state %))
         (u/jcall dispatcher "subscribe" "MESSAGE_CREATE" (state-get state "boundMessageCreate"))
+        (u/jcall dispatcher "subscribe" "MESSAGE_UPDATE" (state-get state "boundMessageCreate"))
+        (u/jcall dispatcher "subscribe" "LOAD_MESSAGES_SUCCESS" (state-get state "boundMessagesLoaded"))
+        (u/jcall dispatcher "subscribe" "CHANNEL_SELECT" (state-get state "boundChannelSelect"))
         (u/jcall dispatcher "subscribe" "MESSAGE_REACTION_ADD" (state-get state "boundReactionAdd"))
         (u/jcall dispatcher "subscribe" "MESSAGE_REACTION_REMOVE" (state-get state "boundReactionRemove")))))
    (state-set! state "started" true)
@@ -337,6 +362,9 @@
     (try
       (when dispatcher
         (u/jcall dispatcher "unsubscribe" "MESSAGE_CREATE" (state-get state "boundMessageCreate"))
+        (u/jcall dispatcher "unsubscribe" "MESSAGE_UPDATE" (state-get state "boundMessageCreate"))
+        (u/jcall dispatcher "unsubscribe" "LOAD_MESSAGES_SUCCESS" (state-get state "boundMessagesLoaded"))
+        (u/jcall dispatcher "unsubscribe" "CHANNEL_SELECT" (state-get state "boundChannelSelect"))
         (u/jcall dispatcher "unsubscribe" "MESSAGE_REACTION_ADD" (state-get state "boundReactionAdd"))
         (u/jcall dispatcher "unsubscribe" "MESSAGE_REACTION_REMOVE" (state-get state "boundReactionRemove")))
       (catch :default err (log! "warn" plugin-meta "unsubscribe failed" err))))

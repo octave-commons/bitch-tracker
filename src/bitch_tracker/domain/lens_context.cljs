@@ -52,6 +52,26 @@
      :text (str (or (:text event) ""))
      :attachments (->> (:attachments extra) (keep :url) (map str) vec)}))
 
+(defn- message-sort-key
+  "Chronological sort key for context messages: ISO timestamp first, then Discord snowflake id."
+  [m]
+  (let [mid (str (:message-id m))]
+    [(str (:ts m)) (count mid) mid (str (:event-id m))]))
+
+(defn merge-messages
+  "Merges existing and incoming context messages for a channel without unloading
+  messages when Discord's sliding MessageStore window shifts during scroll.
+  Deduplicates by :event-id (incoming overwrites existing), sorts oldest-first,
+  and retains up to max-tail-limit messages."
+  [existing incoming]
+  (->> (concat (or existing []) (or incoming []))
+       (remove #(str/blank? (str (:event-id %))))
+       (reduce (fn [acc m] (assoc acc (:event-id m) m)) {})
+       vals
+       (sort-by message-sort-key)
+       (take-last max-tail-limit)
+       vec))
+
 (defn- minute-stamp
   "Shortens an ISO timestamp to minute precision for compact transcripts."
   [ts]

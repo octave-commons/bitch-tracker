@@ -27,6 +27,7 @@
    :connected? false
    :lens-config offline-config
    :open? false
+   :channel-messages {}
    :selections {}
    :conversations {}
    :requests {}
@@ -72,9 +73,12 @@
       (session/new-conversation (str (random-uuid)))))
 
 (defn- resolve-current [app channel]
-  (ctx/resolve-context (selection-for app channel)
-                       (discord/loaded-messages (:stores app) (:id channel))
-                       (budget-chars)))
+  (let [cached (get-in app [:channel-messages (:id channel)])
+        live (discord/loaded-messages (:stores app) (:id channel))
+        messages (ctx/merge-messages cached live)]
+    (ctx/resolve-context (selection-for app channel)
+                         messages
+                         (budget-chars))))
 
 (defn- truncate [s n]
   (let [s (str/replace (str s) #"\s+" " ")]
@@ -246,6 +250,25 @@
       (.preventDefault e)
       (set-open! app* (not (:open? @app*))))))
 
+(defn- harvest-channel! [app* channel-id incoming]
+  (when (and (seq (str channel-id)) (seq incoming))
+    (swap! app* update-in [:channel-messages (str channel-id)] ctx/merge-messages incoming)))
+
+(defn- harvest-open-channel! [app*]
+  (let [{:keys [stores]} @app*]
+    (when-let [channel-id (and stores (discord/selected-channel-id stores))]
+      (harvest-channel! app* channel-id (discord/loaded-messages stores channel-id)))))
+
+(defn- on-discord-action! [app* ^js action]
+  (let [{:keys [stores]} @app*]
+    (when stores
+      (when-let [channel-id (discord/action-channel-id action)]
+        (harvest-channel! app* channel-id (discord/action-messages stores action))
+        (harvest-channel! app* channel-id (discord/loaded-messages stores channel-id)))
+      (harvest-open-channel! app*)))
+  (when (:open? @app*)
+    (render-soon! app*)))
+
 (defn ^:async start!
   "Loads stores, restores conversation ids, mounts the drawer, patches the message menu, and connects to the bot."
   [plugin-meta app*]
@@ -259,15 +282,17 @@
                               :on-send #(send! app* %)
                               :on-stop #(stop-turn! app*)}))
         keydown (keybind-handler app*)
-        rerender #(when (:open? @app*) (render-soon! app*))]
+        on-action #(on-discord-action! app* %)]
     (swap! app* assoc :stores stores :refs refs :conversations (load-conversations))
+    (harvest-open-channel! app*)
     (connect! app*)
     (when document (.addEventListener document "keydown" keydown))
     (swap! app* assoc :cleanup
            (->> [(discord/patch-message-menu! plugin-name #(pin-from-menu! app* %1 %2))
-                 (discord/subscribe! stores "CHANNEL_SELECT" rerender)
-                 (discord/subscribe! stores "LOAD_MESSAGES_SUCCESS" rerender)
-                 (discord/subscribe! stores "MESSAGE_CREATE" rerender)
+                 (discord/subscribe! stores "CHANNEL_SELECT" on-action)
+                 (discord/subscribe! stores "LOAD_MESSAGES_SUCCESS" on-action)
+                 (discord/subscribe! stores "MESSAGE_CREATE" on-action)
+                 (discord/subscribe! stores "MESSAGE_UPDATE" on-action)
                  (when document #(.removeEventListener document "keydown" keydown))]
                 (remove nil?)
                 vec))

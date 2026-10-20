@@ -38,16 +38,49 @@
 
 ;; Tests that Discord messages reach context through the shared OpenPlanner event builder.
 (t/deftest context-message-reuses-openplanner-event-ids
-  (let [message #js {:id "m1" :channel_id "c1" :content "hello"
+  (let [message #js {:id "m1" :channel_id "c1" :content "hello <@12345> <#67890> https://orbit.dev/docs"
                      :timestamp "2026-10-19T12:00:00.000Z"
                      :author #js {:id "u1" :username "alice" :globalName "Alice"}
+                     :mentions #js [#js {:id "12345" :username "bob" :globalName "Bob"}]
+                     :message_reference #js {:message_id "m0" :channel_id "c1" :guild_id "g1"}
+                     :referenced_message #js {:id "m0" :author #js {:id "u0" :username "orbit_author"}}
                      :attachments #js [#js {:id "a1" :url "https://cdn.example/a.png"}]}
         event (events/message-to-event message #js {:id "c1" :name "general"} "g1" #{})
-        cm (ctx/event->context-message (js->clj event :keywordize-keys true))]
+        event-map (js->clj event :keywordize-keys true)
+        cm (ctx/event->context-message event-map)
+        graph-evs (mapv #(js->clj % :keywordize-keys true) (events/message-graph-events event))
+        edge-kinds (set (keep #(when (= "graph.edge" (:kind %)) (get-in % [:extra :edge_kind])) graph-evs))
+        node-ids (set (keep #(when (= "graph.node" (:kind %)) (get-in % [:extra :node_id])) graph-evs))]
     (t/is (= "discord:g1:c1:m1" (:event-id cm)) "context ids match the ids bitch-tracker ingests into OpenPlanner")
     (t/is (= "Alice" (:author cm)))
-    (t/is (= "hello" (:text cm)))
+    (t/is (= ["12345"] (get-in event-map [:extra :mentions])))
+    (t/is (= ["67890"] (get-in event-map [:extra :mention_channels])))
+    (t/is (= "m0" (get-in event-map [:extra :reply_to_message_id])))
+    (t/is (= "u0" (get-in event-map [:extra :reply_to_author_id])))
+    (t/is (= ["https://orbit.dev/docs" "https://cdn.example/a.png"] (get-in event-map [:extra :urls])))
+    (t/is (contains? edge-kinds "authored_by"))
+    (t/is (contains? edge-kinds "in_channel"))
+    (t/is (contains? edge-kinds "mentions_user"))
+    (t/is (contains? edge-kinds "mentions_channel"))
+    (t/is (contains? edge-kinds "replies_to"))
+    (t/is (contains? edge-kinds "replies_to_user"))
+    (t/is (contains? edge-kinds "mentions_web_url"))
+    (t/is (contains? node-ids "discord:user:u1"))
+    (t/is (contains? node-ids "discord:user:12345"))
+    (t/is (contains? node-ids "discord:channel:c1"))
+    (t/is (contains? node-ids "discord:channel:67890"))
+    (t/is (contains? node-ids "web:url:https://orbit.dev/docs"))
     (t/is (= ["https://cdn.example/a.png"] (:attachments cm)))))
+
+;; Tests that scrolling up to older messages retains newer messages unloaded by Discord's MessageStore.
+(t/deftest merge-messages-retains-unloaded-newer-messages-on-scroll
+  (let [newer [(msg 10 "new 10") (msg 11 "new 11") (msg 12 "new 12")]
+        older [(msg 7 "old 7") (msg 8 "old 8") (msg 9 "old 9") (msg 10 "new 10 edited")]
+        merged (ctx/merge-messages newer older)]
+    (t/is (= ["m7" "m8" "m9" "m10" "m11" "m12"] (mapv :message-id merged))
+          "older scrolled messages merge chronologically before newer retained messages")
+    (t/is (= "new 10 edited" (:text (nth merged 3)))
+          "incoming message updates overwrite existing entries with the same event-id")))
 
 ;; Tests that rendered lines are single-line and cannot break out of a context block.
 (t/deftest render-message-defangs-context-tags

@@ -5,6 +5,7 @@
             [bitch-tracker.bot.lens :as lens]
             [bitch-tracker.bot.openplanner :as op]
             [bitch-tracker.shape.protocol :as proto]
+            [bitch-tracker.shared.events :as events]
             [bitch-tracker.shared.util :as u]
             [clojure.string :as str]))
 
@@ -108,15 +109,18 @@
     (when (and event dedup-state)
       (when (dedup/add! dedup-state (event-id event) (dedup-ttl-ms config) (dedup-max-size config))
         (when (and op-state config)
-          (op/queue-event! op-state event (:max-persisted-events config)))
+          (op/queue-event! op-state event (:max-persisted-events config))
+          (doseq [graph-ev (events/message-graph-events event)]
+            (op/queue-event! op-state graph-ev (:max-persisted-events config))))
         ;; Route moderation-watch and known-watch-user messages to tracker channel.
         (when (and discord-client config)
           (let [text (str (u/jget event "text"))
                 hits (moderation-hits state text)
                 extra (u/jget event "extra")
                 is-known? (boolean (u/jget extra "is_known_watch_user"))
+                historical? (boolean (u/jget extra "historical"))
                 author-id (str (u/jget event "meta" "author_id"))]
-            (when (and (or (seq hits) is-known?) (not= author-id bot-user-id))
+            (when (and (or (seq hits) is-known?) (not historical?) (not= author-id bot-user-id))
               (let [guild-id (str (u/jget extra "guild_id"))
                     channel-id (str (u/jget extra "channel_id"))
                     message-id (str (u/jget extra "message_id"))

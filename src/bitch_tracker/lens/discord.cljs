@@ -4,7 +4,8 @@
   (:require [bitch-tracker.domain.lens-context :as ctx]
             [bitch-tracker.plugin.bd :as bd]
             [bitch-tracker.shared.events :as events]
-            [bitch-tracker.shared.util :as u]))
+            [bitch-tracker.shared.util :as u]
+            [clojure.string :as str]))
 
 (defn load-stores
   "Resolves the Discord stores KnoxxLens reads from."
@@ -64,6 +65,31 @@
   (->> (u/js-values (u/jcall message-store "getMessages" channel-id))
        (remove #(or (= "SENDING" (u/jget % "state")) (= 8 (u/jget % "type"))))
        (mapv #(message->context stores % channel-id))))
+
+(defn action-channel-id
+  "Extracts the channel id from a Dispatcher action payload, or nil."
+  [^js action]
+  (let [cid (or (u/jget action "channelId")
+                (u/jget action "channel_id")
+                (u/jget action "message" "channel_id")
+                (u/jget action "message" "channelId"))]
+    (when (u/present-string? cid)
+      (str cid))))
+
+(defn action-messages
+  "Extracts context messages from a Dispatcher action payload (LOAD_MESSAGES_SUCCESS, MESSAGE_CREATE, MESSAGE_UPDATE)."
+  [stores ^js action]
+  (when-let [channel-id (action-channel-id action)]
+    (let [raw-msgs (cond
+                     (u/jget action "messages") (u/js-values (u/jget action "messages"))
+                     (u/jget action "message") [(u/jget action "message")]
+                     :else [])]
+      (->> raw-msgs
+           (remove #(or (nil? %)
+                        (= "SENDING" (u/jget % "state"))
+                        (= 8 (u/jget % "type"))
+                        (str/blank? (str (u/jget % "id")))))
+           (mapv #(message->context stores % channel-id))))))
 
 (defn patch-message-menu!
   "Adds an 'Add to Knoxx context' item to Discord's message context menu.
