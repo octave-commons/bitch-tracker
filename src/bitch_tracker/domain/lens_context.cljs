@@ -11,11 +11,11 @@
 
 (def max-tail-limit
   "Upper bound for the channel-tail chip."
-  200)
+  1000)
 
 (def default-budget-chars
   "Character budget for all rendered context in one turn (~4 chars per token)."
-  16000)
+  128000)
 
 (def chars-per-token
   "Rough characters-per-token ratio used for chip estimates."

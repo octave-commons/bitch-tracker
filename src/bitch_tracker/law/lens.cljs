@@ -5,11 +5,11 @@
 
 (def max-message-chars
   "Upper bound for the user's question text."
-  4000)
+  32000)
 
 (def max-context-chars
   "Hard upper bound for rendered context text accepted from a plugin."
-  64000)
+  512000)
 
 (def max-context-items
   "Upper bound for context items in one ask."
