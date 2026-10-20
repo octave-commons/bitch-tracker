@@ -7,7 +7,7 @@
 
 (def default-tail-limit
   "Number of most-recent channel messages included when the tail chip is on."
-  50)
+  250)
 
 (def max-tail-limit
   "Upper bound for the channel-tail chip."
