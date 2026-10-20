@@ -13,26 +13,27 @@
 (def css
   "Drawer stylesheet; colors come from Discord theme variables (and therefore UXX when installed)."
   "
-.knoxx-lens-toggle{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:1001;padding:10px 6px;border:none;border-radius:8px 0 0 8px;background:var(--brand-500,var(--button-background,#5865f2));color:#fff;font-weight:700;cursor:pointer;writing-mode:vertical-rl;letter-spacing:.08em}
-.knoxx-lens{position:fixed;top:48px;right:0;bottom:0;width:400px;max-width:90vw;z-index:1000;display:none;flex-direction:column;background:var(--background-secondary,#2b2d31);color:var(--text-normal,#dbdee1);border-left:1px solid var(--background-modifier-accent,#3f4147);box-shadow:-8px 0 24px rgba(0,0,0,.25);font-size:14px}
+.knoxx-lens-toggle{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:1001;padding:10px 6px;border:none;border-radius:8px 0 0 8px;background:var(--brand-500,var(--button-background,#5865f2));color:#fff;font-weight:700;cursor:pointer;writing-mode:vertical-rl;letter-spacing:.08em;user-select:none;-webkit-user-select:none}
+.knoxx-lens{position:fixed;top:48px;right:0;bottom:0;width:400px;max-width:90vw;z-index:1000;display:none;flex-direction:column;background:var(--background-secondary,#2b2d31);color:var(--text-normal,#dbdee1);border-left:1px solid var(--background-modifier-accent,#3f4147);box-shadow:-8px 0 24px rgba(0,0,0,.25);font-size:14px;user-select:text !important;-webkit-user-select:text !important}
 .knoxx-lens.open{display:flex}
-.knoxx-lens header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--background-modifier-accent,#3f4147)}
+.knoxx-lens header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--background-modifier-accent,#3f4147);user-select:none;-webkit-user-select:none}
 .knoxx-lens header .title{flex:1;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.knoxx-lens .badge{font-size:11px;padding:2px 6px;border-radius:999px;background:var(--background-tertiary,#1e1f22);color:var(--text-muted,#949ba4)}
+.knoxx-lens .badge{font-size:11px;padding:2px 6px;border-radius:999px;background:var(--background-tertiary,#1e1f22);color:var(--text-muted,#949ba4);user-select:none;-webkit-user-select:none}
 .knoxx-lens .badge.ready{color:var(--text-positive,#23a55a)}
 .knoxx-lens .badge.blocked{color:var(--text-danger,#f23f43)}
-.knoxx-lens button.k-btn{border:none;border-radius:6px;padding:6px 10px;background:var(--background-modifier-accent,#3f4147);color:var(--text-normal,#dbdee1);cursor:pointer}
+.knoxx-lens button.k-btn{border:none;border-radius:6px;padding:6px 10px;background:var(--background-modifier-accent,#3f4147);color:var(--text-normal,#dbdee1);cursor:pointer;user-select:none;-webkit-user-select:none}
 .knoxx-lens button.k-btn.primary{background:var(--brand-500,var(--button-background,#5865f2));color:#fff}
 .knoxx-lens button.k-btn:disabled{opacity:.5;cursor:default}
-.knoxx-lens .chips{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px 0}
+.knoxx-lens .chips{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px 0;user-select:none;-webkit-user-select:none}
 .knoxx-lens .chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:3px 8px;border-radius:999px;border:1px solid var(--background-modifier-accent,#3f4147);background:var(--background-primary,#313338);font-size:12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .knoxx-lens .chip.off{opacity:.45;text-decoration:line-through}
 .knoxx-lens .chip .x{color:var(--text-muted,#949ba4)}
-.knoxx-lens .budget{padding:4px 12px 8px;font-size:11px;color:var(--text-muted,#949ba4);border-bottom:1px solid var(--background-modifier-accent,#3f4147)}
+.knoxx-lens .budget{padding:4px 12px 8px;font-size:11px;color:var(--text-muted,#949ba4);border-bottom:1px solid var(--background-modifier-accent,#3f4147);user-select:none;-webkit-user-select:none}
 .knoxx-lens .budget.warn{color:var(--text-warning,#f0b232)}
-.knoxx-lens .problems{padding:8px 12px;font-size:12px;color:var(--text-danger,#f23f43);white-space:pre-wrap}
-.knoxx-lens .transcript{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
-.knoxx-lens .turn{white-space:pre-wrap;word-break:break-word;line-height:1.4}
+.knoxx-lens .problems{padding:8px 12px;font-size:12px;color:var(--text-danger,#f23f43);white-space:pre-wrap;user-select:text !important;-webkit-user-select:text !important}
+.knoxx-lens .transcript{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px;user-select:text !important;-webkit-user-select:text !important}
+.knoxx-lens .turn{white-space:pre-wrap;word-break:break-word;line-height:1.4;user-select:text !important;-webkit-user-select:text !important}
+.knoxx-lens .turn *{user-select:text !important;-webkit-user-select:text !important}
 .knoxx-lens .turn .who{font-weight:700;margin-right:6px}
 .knoxx-lens .turn.user .who{color:var(--text-link,#00a8fc)}
 .knoxx-lens .turn.assistant .who{color:var(--text-positive,#23a55a)}
@@ -40,7 +41,7 @@
 .knoxx-lens .turn.error .body{color:var(--text-danger,#f23f43)}
 .knoxx-lens .empty{color:var(--text-muted,#949ba4);font-size:13px}
 .knoxx-lens footer{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--background-modifier-accent,#3f4147)}
-.knoxx-lens textarea{flex:1;resize:none;min-height:56px;max-height:160px;padding:8px;border-radius:6px;border:1px solid var(--background-modifier-accent,#3f4147);background:var(--channeltextarea-background,var(--background-primary,#313338));color:var(--text-normal,#dbdee1);font:inherit}
+.knoxx-lens textarea{flex:1;resize:none;min-height:56px;max-height:160px;padding:8px;border-radius:6px;border:1px solid var(--background-modifier-accent,#3f4147);background:var(--channeltextarea-background,var(--background-primary,#313338));color:var(--text-normal,#dbdee1);font:inherit;user-select:text !important;-webkit-user-select:text !important}
 ")
 
 (defn- el
