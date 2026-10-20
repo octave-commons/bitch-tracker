@@ -77,3 +77,19 @@
 (def ^:const lens-error-to-plugin
   "Wire name for a failed or refused KnoxxLens turn delivered to the plugin."
   "bot:lens:error")
+
+(def ^:const lens-sessions-list-to-bot
+  "Wire name for requesting past KnoxxLens sessions from the bot."
+  "lens:sessions:list")
+
+(def ^:const lens-sessions-list-to-plugin
+  "Wire name for past KnoxxLens sessions delivered to the plugin."
+  "bot:lens:sessions")
+
+(def ^:const lens-session-get-to-bot
+  "Wire name for requesting full turns of a past KnoxxLens session from the bot."
+  "lens:session:get")
+
+(def ^:const lens-session-get-to-plugin
+  "Wire name for full turns of a past KnoxxLens session delivered to the plugin."
+  "bot:lens:session")

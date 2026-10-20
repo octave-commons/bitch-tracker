@@ -130,6 +130,60 @@
       (knoxx/abort-turn! config conversation-id "knoxx-lens client disconnected")
       (finish! runs conversation-id))))
 
+(defn ^:async handle-list-sessions!
+  "Lists past Knoxx sessions and emits them back to the asking plugin socket."
+  [config ^js socket raw]
+  (let [req (js->clj (or raw #js {}) :keywordize-keys true)
+        problems (law/config-problems config)]
+    (if (seq problems)
+      (emit! socket proto/lens-sessions-list-to-plugin {:ok false :error (str/join "; " problems) :rows []})
+      (try
+        (let [res (await (knoxx/list-sessions! config {:limit (:limit req 30) :offset (:offset req 0)}))]
+          (if (:ok res)
+            (emit! socket proto/lens-sessions-list-to-plugin
+                   {:ok true
+                    :rows (vec (or (get-in res [:body :rows]) []))
+                    :hasMore (boolean (get-in res [:body :has_more]))})
+            (emit! socket proto/lens-sessions-list-to-plugin
+                   {:ok false
+                    :error (str "Knoxx HTTP " (:status res))
+                    :rows []})))
+        (catch :default err
+          (emit! socket proto/lens-sessions-list-to-plugin
+                 {:ok false :error (str "Knoxx unreachable: " (.-message err)) :rows []}))))))
+
+(defn ^:async handle-get-session!
+  "Fetches a single past Knoxx session's rows and emits them to the asking plugin socket."
+  [config ^js socket raw]
+  (let [req (js->clj (or raw #js {}) :keywordize-keys true)
+        session-id (str (or (:sessionId req) (:conversationId req) ""))
+        problems (law/config-problems config)]
+    (cond
+      (seq problems)
+      (emit! socket proto/lens-session-get-to-plugin
+             {:ok false :sessionId session-id :error (str/join "; " problems) :rows []})
+
+      (str/blank? session-id)
+      (emit! socket proto/lens-session-get-to-plugin
+             {:ok false :sessionId "" :error "sessionId is required" :rows []})
+
+      :else
+      (try
+        (let [res (await (knoxx/get-session! config session-id))]
+          (if (:ok res)
+            (emit! socket proto/lens-session-get-to-plugin
+                   {:ok true
+                    :sessionId session-id
+                    :rows (vec (or (get-in res [:body :rows]) []))})
+            (emit! socket proto/lens-session-get-to-plugin
+                   {:ok false
+                    :sessionId session-id
+                    :error (str "Knoxx HTTP " (:status res))
+                    :rows []})))
+        (catch :default err
+          (emit! socket proto/lens-session-get-to-plugin
+                 {:ok false :sessionId session-id :error (str "Knoxx unreachable: " (.-message err)) :rows []}))))))
+
 (defn register!
   "Wires KnoxxLens socket handlers onto a newly connected plugin socket."
   [runs config ^js socket]
@@ -137,4 +191,6 @@
        (fn [_] (emit! socket proto/lens-config-response-to-plugin (lens-config config))))
   (.on socket proto/lens-ask-to-bot (fn [data] (handle-ask! runs config socket data)))
   (.on socket proto/lens-abort-to-bot (fn [data] (handle-abort! runs config socket data)))
+  (.on socket proto/lens-sessions-list-to-bot (fn [data] (handle-list-sessions! config socket data)))
+  (.on socket proto/lens-session-get-to-bot (fn [data] (handle-get-session! config socket data)))
   (.on socket "disconnect" (fn [] (handle-disconnect! runs config socket))))

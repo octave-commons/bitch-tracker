@@ -1,5 +1,5 @@
 (ns bitch-tracker.bot.knoxx
-  "Knoxx HTTP + WebSocket transport for KnoxxLens turns.
+  "Knoxx HTTP + WebSocket transport for KnoxxLens turns and session recall.
   All I/O; no domain policy. Uses Node's global fetch and WebSocket (Node >= 22)."
   (:require [bitch-tracker.shared.util :as u]))
 
@@ -13,6 +13,18 @@
     (.set (.-searchParams url) "conversation_id" conversation-id)
     (str url)))
 
+(defn ^:async get-json!
+  "GETs path on Knoxx. Returns {:ok bool :status n :body clj-map}."
+  [config path]
+  (let [res (await (js/fetch (str (:knoxx-base-url config) path)
+                             #js {:method "GET"
+                                  :headers (headers config)}))
+        text (await (.text res))
+        parsed (u/parse-json text nil)]
+    {:ok (.-ok res)
+     :status (.-status res)
+     :body (if parsed (js->clj parsed :keywordize-keys true) {:raw text})}))
+
 (defn ^:async post-json!
   "POSTs body (CLJS map) to path on Knoxx. Returns {:ok bool :status n :body clj-map}."
   [config path body]
@@ -25,6 +37,18 @@
     {:ok (.-ok res)
      :status (.-status res)
      :body (if parsed (js->clj parsed :keywordize-keys true) {:raw text})}))
+
+(defn ^:async list-sessions!
+  "Lists past Knoxx sessions via GET /api/memory/sessions."
+  [config {:keys [limit offset]}]
+  (let [lim (max 1 (min 100 (or limit 30)))
+        off (max 0 (or offset 0))]
+    (await (get-json! config (str "/api/memory/sessions?limit=" lim "&offset=" off)))))
+
+(defn ^:async get-session!
+  "Fetches rows for a past Knoxx session via GET /api/memory/sessions/:sessionId."
+  [config session-id]
+  (await (get-json! config (str "/api/memory/sessions/" (js/encodeURIComponent (str session-id))))))
 
 (defn ^:async start-direct-turn!
   "Queues a direct (non-RAG) Knoxx turn. Resolves to post-json! result."

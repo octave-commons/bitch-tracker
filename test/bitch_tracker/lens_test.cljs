@@ -5,6 +5,7 @@
             [bitch-tracker.domain.lens-session :as session]
             [bitch-tracker.domain.lens-stream :as stream]
             [bitch-tracker.domain.lens-turn :as turn]
+            [bitch-tracker.domain.markdown :as md]
             [bitch-tracker.law.lens :as law]
             [bitch-tracker.shape.protocol :as proto]
             [bitch-tracker.shared.events :as events]
@@ -228,3 +229,78 @@
       (t/is (str/includes? (:error data) "KNOXX_LENS_LOCAL_MODELS")))
     (t/is (empty? @runs) "no run is registered for a refused ask")
     (t/is (not (str/includes? (pr-str (lens/lens-config ok-config)) "test-key")) "readiness payload never carries the API key")))
+
+;; Tests Markdown block and inline AST parsing.
+(t/deftest markdown-parses-headings-lists-code-and-links
+  (let [doc (str "### 🤖 Architecture\n\n"
+                 "See **Orbit** at [orbitdesktop](https://github.com/mojomast/orbitdesktop) and `gemma4:e4b`.\n\n"
+                 "* First item\n"
+                 "* Second *italic* item\n\n"
+                 "```clojure\n(+ 1 2)\n```\n\n"
+                 "---")
+        blocks (md/parse-blocks doc)]
+    (t/is (= [:heading :paragraph :ul :code-block :hr] (mapv :type blocks)))
+    (t/is (= 3 (:level (first blocks))))
+    (t/is (= 2 (count (:items (nth blocks 2)))))
+    (t/is (= {:type :code-block :lang "clojure" :code "(+ 1 2)"} (nth blocks 3)))
+    (t/is (some #(= {:type :link :label "orbitdesktop" :href "https://github.com/mojomast/orbitdesktop"} %)
+                (:children (second blocks))))
+    (t/is (some #(= {:type :code :text "gemma4:e4b"} %)
+                (:children (second blocks))))))
+
+;; Tests folding tool lifecycle events into collapsible tool receipts.
+(t/deftest session-folds-tool-receipts-and-hydrates-past-sessions
+  (let [conv (-> (session/new-conversation "conv-1")
+                 (session/begin-turn "q1" "find orbit" ["#dm · last 50"])
+                 (session/apply-reply :event "q1" {:type "tool_start"
+                                                   :tool "graph_query"
+                                                   :toolCallId "call_1"
+                                                   :preview "{:query \"orbit\"}"})
+                 (session/apply-reply :event "q1" {:type "tool_update"
+                                                   :tool "graph_query"
+                                                   :toolCallId "call_1"
+                                                   :preview "25 nodes"})
+                 (session/apply-reply :event "q1" {:type "tool_end"
+                                                   :tool "graph_query"
+                                                   :toolCallId "call_1"
+                                                   :preview "Nodes:\n1. [discord/message] orbitdesktop"
+                                                   :isError false})
+                 (session/apply-reply :done "q1" {:text "Found Orbit."}))
+        receipt (first (:tool-receipts (last (:turns conv))))]
+    (t/is (= "call_1" (:id receipt)))
+    (t/is (= "graph_query" (:tool receipt)))
+    (t/is (= :done (:status receipt)))
+    (t/is (= "{:query \"orbit\"}" (:input-preview receipt)))
+    (t/is (= ["25 nodes"] (:updates receipt)))
+    (t/is (str/includes? (:output-preview receipt) "orbitdesktop")))
+  (t/testing "hydrates turns and tool receipts from Knoxx session rows and deduplicates unformatted prefix"
+    (let [unformatted (str "Based on the Discord context you provided, this conversation is a deep dive into AI tooling."
+                           "Here is a breakdown:### ArchitectureOrbit is a workspace.")
+          formatted (str "Based on the Discord context you provided, this conversation is a deep dive into AI tooling.\n\n"
+                         "Here is a breakdown:\n\n### Architecture\n* Orbit is a workspace.")
+          rows [{:role "user"
+                 :kind "knoxx.message"
+                 :ts "2026-10-20T08:00:00.000Z"
+                 :text "<discord_context guild=\"dm\" channel=\"#sloptimus\" channel_id=\"c9\" kind=\"channel-tail\" messages=\"90\">\nmsg\n</discord_context>\n\nWhat did we discuss about Orbit?"
+                 :extra {:run_id "r1"}}
+                {:role "assistant"
+                 :kind "knoxx.message"
+                 :ts "2026-10-20T08:00:05.000Z"
+                 :model "gemma4:e4b"
+                 :text (str unformatted formatted)
+                 :extra {:run_id "r1"
+                         :trace_blocks [{:id "tb1"
+                                         :kind "tool_call"
+                                         :toolName "graph_query"
+                                         :toolCallId "call_9"
+                                         :inputPreview "orbit"
+                                         :outputPreview "25 nodes, 10 edges"
+                                         :status "done"
+                                         :isError false}]}}]
+          turns (session/rows->turns rows)]
+      (t/is (= 2 (count turns)))
+      (t/is (= "What did we discuss about Orbit?" (:text (first turns))))
+      (t/is (= ["#sloptimus · 90 msgs"] (:context (first turns))))
+      (t/is (= formatted (:text (second turns))))
+      (t/is (= "graph_query" (:tool (first (:tool-receipts (second turns))))))
+      (t/is (= "25 nodes, 10 edges" (:output-preview (first (:tool-receipts (second turns)))))))))
