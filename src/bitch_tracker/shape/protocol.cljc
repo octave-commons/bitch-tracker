@@ -41,3 +41,39 @@
 (def ^:const config-response-to-plugin
   "Wire name for a bot-config response delivered to the plugin."
   "bot:config:response")
+
+(def ^:const lens-ask-to-bot
+  "Wire name for a KnoxxLens question (message + context items) sent to the bot."
+  "lens:ask")
+
+(def ^:const lens-abort-to-bot
+  "Wire name for a KnoxxLens abort request sent to the bot."
+  "lens:abort")
+
+(def ^:const lens-config-request-to-bot
+  "Wire name for a KnoxxLens config request sent to the bot."
+  "lens:config:get")
+
+(def ^:const lens-config-response-to-plugin
+  "Wire name for the KnoxxLens config response delivered to the plugin."
+  "bot:lens:config")
+
+(def ^:const lens-accepted-to-plugin
+  "Wire name for a KnoxxLens turn acceptance (run/session ids) delivered to the plugin."
+  "bot:lens:accepted")
+
+(def ^:const lens-token-to-plugin
+  "Wire name for a streamed KnoxxLens assistant token delivered to the plugin."
+  "bot:lens:token")
+
+(def ^:const lens-event-to-plugin
+  "Wire name for a KnoxxLens run event (tool start/end, hydration) delivered to the plugin."
+  "bot:lens:event")
+
+(def ^:const lens-done-to-plugin
+  "Wire name for a completed KnoxxLens turn delivered to the plugin."
+  "bot:lens:done")
+
+(def ^:const lens-error-to-plugin
+  "Wire name for a failed or refused KnoxxLens turn delivered to the plugin."
+  "bot:lens:error")

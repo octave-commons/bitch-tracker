@@ -83,3 +83,19 @@
 (def default-semantic-query-instruction
   "Default prompt for embedding messages during semantic similarity scans."
   "Represent the Discord message for semantic retrieval of similar moderation incidents: sexist, racist, transphobic, ableist, antisemitic, misgendering, harassment, or 'just joking' bigotry. Retrieve messages with similar abusive social behavior and intent, not merely exact wording.")
+
+(def default-knoxx-url
+  "Default Knoxx backend URL for KnoxxLens turns (knoxx-social-local API)."
+  "http://127.0.0.1:18881")
+
+(def default-lens-model
+  "Default KnoxxLens model: a local Ollama model, so Discord text stays on-box."
+  "gemma4:e4b")
+
+(def default-lens-local-models
+  "Comma-separated allowlist of model ids KnoxxLens may send Discord context to."
+  "gemma4:e4b,gemma4:latest")
+
+(def lens-turn-timeout-ms
+  "Milliseconds before the bot abandons a KnoxxLens turn that has not finished."
+  300000)

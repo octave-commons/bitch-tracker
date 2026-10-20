@@ -129,7 +129,7 @@
 
 (defn format-status-message
   "Builds a status message for bot or plugin lifecycle events."
-  [{:keys [status user-id username hostname socket-id]}]
+  [{:keys [status user-id username hostname socket-id plugin-name]}]
   (case status
     :bot-online
     (str "✅ **BitchTracker bot server is online**\n"
@@ -137,13 +137,13 @@
          "Started at: " (u/discord-timestamp (.getTime (js/Date.))))
 
     :plugin-connected
-    (str "🟢 **BitchTracker plugin client connected**\n"
+    (str "🟢 **" (or plugin-name "BitchTracker") " plugin client connected**\n"
          "User: <@" user-id "> (" username ")\n"
          "Hostname: `" hostname "`\n"
          "Socket ID: `" socket-id "`")
 
     :plugin-disconnected
-    (str "🔴 **BitchTracker plugin client disconnected**\n"
+    (str "🔴 **" (or plugin-name "BitchTracker") " plugin client disconnected**\n"
          "User: <@" user-id "> (" username ")\n"
          "Hostname: `" hostname "`\n"
          "Socket ID: `" socket-id "`")

@@ -1,61 +1,18 @@
 (ns bitch-tracker.plugin
   "BetterDiscord plugin lifecycle and Discord event handling."
-  (:require [bitch-tracker.plugin.socket-client :as socket]
+  (:require [bitch-tracker.plugin.bd :as bd]
+            [bitch-tracker.plugin.socket-client :as socket]
             [bitch-tracker.shared.constants :as c]
             [bitch-tracker.shared.events :as events]
             [bitch-tracker.shared.util :as u]
             [clojure.string :as str]))
 
 ;; ─────────────────────────────────────────────────────────────
-;; BetterDiscord interop
+;; BetterDiscord interop (shared helpers live in plugin.bd)
 ;; ─────────────────────────────────────────────────────────────
 
-(defn- global-get [k]
-  (aget js/globalThis k))
-
-(defn- bd-api []
-  (global-get "BdApi"))
-
-(defn- bd-webpack []
-  (u/jget (bd-api) "Webpack"))
-
-(defn- meta-field [plugin-meta k fallback]
-  (let [value (when plugin-meta (aget plugin-meta k))]
-    (if (u/present-string? value) value fallback)))
-
 (defn- log! [level plugin-meta & xs]
-  (let [plugin-name (meta-field plugin-meta "name" c/plugin-name)
-        logger (u/jget (bd-api) "Logger")
-        logger-fn (u/jget logger level)
-        console-fn (or (u/jget js/console level) (.-log js/console))]
-    (if logger-fn
-      (.apply logger-fn logger (into-array (cons plugin-name xs)))
-      (.apply console-fn js/console (into-array (cons (str "[" plugin-name "]") xs))))))
-
-(defn- toast! [message toast-type]
-  (when-let [show-toast (u/jget (bd-api) "UI" "showToast")]
-    (.call show-toast (u/jget (bd-api) "UI") message #js {:type toast-type})))
-
-(defn- bd-data-load [plugin setting-key]
-  (u/jcall (u/jget (bd-api) "Data") "load" plugin setting-key))
-
-(defn- bd-data-save! [plugin setting-key value]
-  (u/jcall (u/jget (bd-api) "Data") "save" plugin setting-key value))
-
-(defn- setting [plugin setting-key fallback]
-  (let [value (bd-data-load plugin setting-key)]
-    (if (undefined? value) fallback value)))
-
-(defn- save-setting! [plugin setting-key value]
-  (bd-data-save! plugin setting-key value))
-
-(defn ^:async sleep-ms
-  "Returns a promise that resolves after ms milliseconds."
-  [ms]
-  (await
-   (js/Promise.
-    (fn [resolve-fn _reject]
-      (js/setTimeout resolve-fn ms)))))
+  (apply bd/log! level (bd/meta-field plugin-meta "name" c/plugin-name) xs))
 
 ;; ─────────────────────────────────────────────────────────────
 ;; State
@@ -85,7 +42,7 @@
   v)
 
 (defn- load-modules! [state]
-  (let [webpack (bd-webpack)
+  (let [webpack (bd/webpack)
         get-module (u/jget webpack "getModule")
         get-store (u/jget webpack "getStore")
         dispatcher (when get-module (.call get-module webpack (fn [m] (and (u/jget m "dispatch") (u/jget m "subscribe") (u/jget m "unsubscribe"))) #js {:searchExports true}))
@@ -135,7 +92,7 @@
 ;; ─────────────────────────────────────────────────────────────
 
 (defn- bot-url [state]
-  (let [saved (str (setting "BitchTracker" "botUrl" ""))]
+  (let [saved (str (bd/setting "BitchTracker" "botUrl" ""))]
     (if (u/present-string? saved)
       saved
       (state-get state "bot-url"))))
@@ -153,7 +110,7 @@
                      {:on-watch-alert (fn [data]
                                         (let [user-id (str (u/jget data "userId"))
                                               label-count (u/jget data "count")]
-                                          (toast! (str "Moderation watch alert: " user-id " (" label-count " labels)") "warning")
+                                          (bd/toast! (str "Moderation watch alert: " user-id " (" label-count " labels)") "warning")
                                           (log! "info" plugin-meta "Watch alert received" user-id label-count)))
                       :on-tracker-msg (fn [data]
                                         (log! "info" plugin-meta "Tracker message from bot" (u/jget data "reason")))
@@ -178,11 +135,11 @@
                        (fn [entry]
                          #js [(aget entry 0) (js/Array.from (aget entry 1))]))
         labeled (js/Array.from (state-get state "labeledMessages"))]
-    (bd-data-save! "BitchTracker" "bitchState"
+    (bd/data-save! "BitchTracker" "bitchState"
                    #js {:counts counts :messages messages :labeled labeled})))
 
 (defn- load-label-state! [state]
-  (when-let [saved (bd-data-load "BitchTracker" "bitchState")]
+  (when-let [saved (bd/data-load "BitchTracker" "bitchState")]
     (when (u/jget saved "counts") (state-set! state "bitchCounts" (js/Map. (u/jget saved "counts"))))
     (when (u/jget saved "messages")
       (state-set! state "bitchMessages"
@@ -237,7 +194,7 @@
                                              :channel (channel-for state channel-id)
                                              :guildId (guild-id-for state message (channel-for state channel-id) nil)}))
             (when (and (>= next-count c/label-threshold) (< current c/label-threshold))
-              (toast! (str "User tagged for moderation watch: " aid) "warning"))))))))
+              (bd/toast! (str "User tagged for moderation watch: " aid) "warning"))))))))
 
 (defn- handle-label-reaction-remove! [state message-id channel-id reactor-user-id]
   (let [message (u/jcall (state-get state "messageStore") "getMessage" channel-id message-id)
@@ -301,7 +258,7 @@
     (set! (.-value input) value)
     (set! (.-placeholder input) placeholder)
     (set! (.-cssText (.-style input)) "padding:8px 10px;border-radius:6px;border:1px solid var(--background-modifier-border);background:var(--background-secondary);color:var(--text-normal);")
-    (.addEventListener input "change" #(save-setting! plugin setting-key (.-value input)))
+    (.addEventListener input "change" #(bd/data-save! plugin setting-key (.-value input)))
     (.append wrap label input)
     wrap))
 
@@ -320,12 +277,12 @@
 (defn settings-panel
   "Builds and returns the BetterDiscord settings panel DOM element."
   [plugin-meta state]
-  (when-let [document (global-get "document")]
+  (when-let [document (bd/global-get "document")]
     (let [root (.createElement document "div")
           title (.createElement document "h2")
-          saved-url (str (setting "BitchTracker" "botUrl" ""))]
+          saved-url (str (bd/setting "BitchTracker" "botUrl" ""))]
       (set! (.-cssText (.-style root)) "padding:16px;display:flex;flex-direction:column;gap:12px;color:var(--text-normal);")
-      (set! (.-textContent title) (meta-field plugin-meta "name" c/plugin-name))
+      (set! (.-textContent title) (bd/meta-field plugin-meta "name" c/plugin-name))
       (.appendChild root title)
       (.append root
                (field! document "Bot socket.io URL" "BitchTracker" "botUrl" saved-url "http://127.0.0.1:7878" false)
@@ -334,10 +291,10 @@
                (append-text! document root "div" (str "Tracker channel: " c/tracker-channel-id))
                (append-text! document root "div" (str "Watch channel: " c/watch-channel-id))
                (append-text! document root "div" (str "Tracked users: " (.-size (state-get state "bitchCounts")) ", labeled messages: " (.-size (state-get state "labeledMessages"))))
-               (button! document "Backfill Now" #(do (toast! "Backfill requested" "info")
+               (button! document "Backfill Now" #(do (bd/toast! "Backfill requested" "info")
                                                      (when-let [socket-state (state-get state "socket-state")]
                                                        (socket/send-backfill! socket-state #js {:ts (u/now-iso)}))))
-               (button! document "Test Tracker Send" #(do (toast! "Tracker send requested" "info")
+               (button! document "Test Tracker Send" #(do (bd/toast! "Tracker send requested" "info")
                                                           (when-let [socket-state (state-get state "socket-state")]
                                                             (socket/send-event! socket-state
                                                                                 #js {:kind "discord.test"
@@ -352,7 +309,7 @@
 (defn ^:async start-plugin!
   "Starts the plugin: loads Discord modules, restores label state, connects to the bot, and subscribes to events."
   [plugin-meta state]
-  (await (sleep-ms 0))
+  (await (bd/sleep-ms 0))
   (load-modules! state)
   (load-label-state! state)
   (connect-to-bot! state plugin-meta)
@@ -369,8 +326,8 @@
    (state-set! state "started" true)
    (state-set! state "startedAt" (u/now-iso))
    (state-set! state "stoppedAt" nil)
-   (log! "info" plugin-meta "started" (str "v" (meta-field plugin-meta "version" c/plugin-version)) "no-guild-filter")
-   (toast! (str (meta-field plugin-meta "name" c/plugin-name) " started") "success")
+   (log! "info" plugin-meta "started" (str "v" (bd/meta-field plugin-meta "version" c/plugin-version)) "no-guild-filter")
+   (bd/toast! (str (bd/meta-field plugin-meta "name" c/plugin-name) " started") "success")
   state)
 
 (defn stop-plugin!
@@ -389,17 +346,17 @@
   (state-set! state "stoppedAt" (u/now-iso))
   (state-set! state "runningBackfill" false)
   (log! "info" plugin-meta "stopped")
-  (toast! (str (meta-field plugin-meta "name" c/plugin-name) " stopped") "info")
+  (bd/toast! (str (bd/meta-field plugin-meta "name" c/plugin-name) " stopped") "info")
   state)
 
 (defn ^:async run-backfill!
   "Requests a message backfill from the bot if one is not already running."
   [state]
   (if (state-get state "runningBackfill")
-    (toast! "Backfill already running" "warning")
+    (bd/toast! "Backfill already running" "warning")
     (do
       (state-set! state "runningBackfill" true)
-      (toast! "Backfill requested from bot" "info")
+      (bd/toast! "Backfill requested from bot" "info")
       (when-let [socket-state (state-get state "socket-state")]
         (socket/send-backfill! socket-state #js {:ts (u/now-iso)}))
       (js/setTimeout #(state-set! state "runningBackfill" false) 2000)

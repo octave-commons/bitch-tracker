@@ -68,6 +68,12 @@
     (when (and socket (aget state "connected"))
       (.emit ^js socket event-name data))))
 
+(defn on!
+  "Registers handler for event-name on the current socket. Returns nil without a socket."
+  [state event-name handler]
+  (when-let [^js socket (aget state "socket")]
+    (.on ^js socket event-name handler)))
+
 (defn send-event!
   "Emits an OpenPlanner event to the bot."
   [state event]

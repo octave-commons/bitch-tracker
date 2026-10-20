@@ -158,4 +158,9 @@
       :guild-ids                  (parse-id-set (env-or "BITCH_TRACKER_GUILD_IDS" (aget bot-json "guildIds")))
      :known-label-user-ids       (parse-id-set (env-or "BITCH_TRACKER_KNOWN_LABEL_USER_IDS" (aget bot-json "knownLabelUserIds")))
      :backfill-days              (parse-int-env "BITCH_TRACKER_BACKFILL_DAYS" c/backfill-days)
-     :semantic-scan-every-ms     c/semantic-scan-every-ms}))
+     :semantic-scan-every-ms     c/semantic-scan-every-ms
+     :knoxx-base-url             (str/replace (env-or "KNOXX_BASE_URL" c/default-knoxx-url) #"/+$" "")
+     :knoxx-api-key              (env-or "KNOXX_API_KEY" "")
+     :lens-model                 (env-or "KNOXX_LENS_MODEL" c/default-lens-model)
+     :lens-local-models          (parse-id-set (env-or "KNOXX_LENS_LOCAL_MODELS" c/default-lens-local-models))
+     :lens-turn-timeout-ms       (parse-int-env "KNOXX_LENS_TURN_TIMEOUT_MS" c/lens-turn-timeout-ms)}))

@@ -21,14 +21,20 @@ module.exports = {
         BITCH_TRACKER_SOCKET_PORT: "7878",
         BITCH_TRACKER_PUBLIC_BASE_URL: "https://radar-stealth.promethean.rest",
         OPENPLANNER_BASE_URL: "http://127.0.0.1:7777",
-        OPENPLANNER_API_KEY: process.env.OPENPLANNER_API_KEY
+        OPENPLANNER_API_KEY: process.env.OPENPLANNER_API_KEY,
+        KNOXX_BASE_URL: "http://127.0.0.1:18881",
+        KNOXX_API_KEY: process.env.KNOXX_API_KEY,
+        KNOXX_LENS_MODEL: "gemma4:e4b"
       },
       env_production: {
         NODE_ENV: "production",
         BITCH_TRACKER_SOCKET_PORT: "7878",
         BITCH_TRACKER_PUBLIC_BASE_URL: "https://radar-stealth.promethean.rest",
         OPENPLANNER_BASE_URL: "http://127.0.0.1:7777",
-        OPENPLANNER_API_KEY: process.env.OPENPLANNER_API_KEY
+        OPENPLANNER_API_KEY: process.env.OPENPLANNER_API_KEY,
+        KNOXX_BASE_URL: "http://127.0.0.1:18881",
+        KNOXX_API_KEY: process.env.KNOXX_API_KEY,
+        KNOXX_LENS_MODEL: "gemma4:e4b"
       },
       log_file: "./logs/bitch-tracker-bot-combined.log",
       out_file: "./logs/bitch-tracker-bot-out.log",

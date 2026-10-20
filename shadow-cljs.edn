@@ -12,6 +12,13 @@
    :compiler-options
    {:infer-externs :auto}}
 
+  :lens
+  {:target :node-script
+   :main bitch-tracker.lens/main!
+   :output-to "build/KnoxxLens.raw.js"
+   :compiler-options
+   {:infer-externs :auto}}
+
   :bot
   {:target :node-script
    :main bitch-tracker.bot.main/main!

@@ -2,6 +2,7 @@
   (:require [bitch-tracker.bot.config :as cfg]
             [bitch-tracker.bot.dedup :as dedup]
             [bitch-tracker.bot.discord :as discord]
+            [bitch-tracker.bot.lens :as lens]
             [bitch-tracker.bot.openplanner :as op]
             [bitch-tracker.shape.protocol :as proto]
             [bitch-tracker.shared.util :as u]
@@ -20,7 +21,8 @@
        "op_state" nil
        "dedup_state" nil
        "config" nil
-       "watchlist" nil})
+       "watchlist" nil
+       "lens_runs" (lens/make-state)})
 
 ;; ─────────────────────────────────────────────────────────────
 ;; Label tracking: each (message-author, message-id, reactor-id)
@@ -217,7 +219,8 @@
         user-id (when plugin-identity (str (u/jget plugin-identity "user_id")))
         username (when plugin-identity (str (u/jget plugin-identity "username")))
         hostname (when plugin-identity (str (u/jget plugin-identity "hostname")))
-         socket-id (when socket (.-id socket))]
+        plugin-name (when plugin-identity (u/jget plugin-identity "plugin"))
+        socket-id (when socket (.-id socket))]
     (when (and discord-client channel-id)
       (discord/send-message!
        discord-client
@@ -227,6 +230,7 @@
          :user-id user-id
          :username username
          :hostname hostname
+         :plugin-name plugin-name
          :socket-id socket-id})))))
 
 (defn on-connection!
@@ -254,8 +258,11 @@
          (set! (.-plugin_identity socket) (clj->js
                                            {:user_id (str (u/jget data "userId"))
                                             :username (str (u/jget data "username"))
-                                            :hostname (str (u/jget data "hostname"))}))
+                                            :hostname (str (u/jget data "hostname"))
+                                            :plugin (u/jget data "plugin")}))
          (notify-status! state :plugin-connected socket)))
+
+  (lens/register! (.-lens_runs state) (.-config state) socket)
 
   (.on socket "disconnect"
        (fn []
