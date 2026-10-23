@@ -92,3 +92,28 @@ A future Discord update may remove the loader again. Check
 `betterdiscordctl status`, restore injection with the installed tool if needed,
 and restart Discord. The relay requires Stealth and Tailscale to be available.
 Open KnoxxLens with Ctrl+Shift+K.
+
+## Automatic BetterDiscord repair
+
+Yoga user units `betterdiscord-repair.timer` and `betterdiscord-repair.service`
+are enabled and committed as `707ec0b` on `device/yoga` in its systemd repo.
+The timer checks 10 seconds after the user manager starts and then every
+30 seconds (with up to 2 seconds scheduling tolerance).
+
+The service checks the installed `betterdiscordctl status`. If the loader is
+missing, it invokes `betterdiscordctl install` against the existing local
+BetterDiscord archive. A healthy installation is skipped without rewriting
+files. Installer/discovery failures remain visible in the user journal.
+
+The repair never calls `reinstall`, which can kill Discord. It does not restart
+Discord or interrupt calls. After a repair it shows a desktop notification:
+if plugins are missing in the current session, restart Discord when convenient.
+This repairs update damage; it does not promise compatibility with every future
+Discord release or replace the framework's own version updater.
+
+Validation simulated Discord removing the loader, verified the official
+installer restored the exact original contents, confirmed the running Discord
+PID stayed the same, and confirmed a repeated healthy check did not rewrite
+`index.js`. The pre-test loader was retained in the installation backup folder.
+The enabled timer also restored a second simulated update automatically in
+16 seconds, without manually starting the repair service.
