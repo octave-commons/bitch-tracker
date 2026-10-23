@@ -1,0 +1,11 @@
+[Unit]
+Description=Check BetterDiscord after login and Discord updates
+
+[Timer]
+OnStartupSec=10s
+OnUnitInactiveSec=30s
+AccuracySec=2s
+Unit=betterdiscord-repair.service
+
+[Install]
+WantedBy=timers.target

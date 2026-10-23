@@ -1,0 +1,4 @@
+{:schema 1
+ :channel "/home/err/.local/share/bitch-tracker/channel"
+ :role :member
+ :peers []}

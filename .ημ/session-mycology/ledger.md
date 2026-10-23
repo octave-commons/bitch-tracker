@@ -16,3 +16,12 @@
   spore: none
   receipt-refs: 707ec0b
   note: Reuse installed betterdiscordctl with status guard and systemd timer. install repairs without stopping Discord; reinstall may terminate it. Verify real timer recovery and healthy no-op behavior.
+- ts: 2026-10-23T04:33:28.292391592Z
+  session: /home/err/spaces/bitch-tracker
+  task: Establish federated workstation suite lifecycle on Stealth and Yoga
+  p-efficiency: 0.8
+  p-friction: 0.5
+  p-skill-candidate: 0.6
+  spore: none
+  receipt-refs: 2b4dd22,b40f431,de9ca9da
+  note: Separate release publication from client convergence and machine/root policy. Preserve unknown local changes; validate staged bytes and test rollback. SCI FileLock close is not exposed: keep FileChannel open to own lock lifetime. Existing LAN SSH works; unattended tailnet SSH may need interactive reauthorization and must remain visible.

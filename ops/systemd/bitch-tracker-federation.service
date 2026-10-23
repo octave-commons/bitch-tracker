@@ -1,0 +1,12 @@
+[Unit]
+Description=Distribute the qualified stable suite release and collect peer status
+OnFailure=bitch-tracker-attention@%n.service
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bb -cp %h/.local/lib/bitch-tracker -m bitch-tracker.infra.federation sync
+TimeoutStartSec=180
+NoNewPrivileges=true
+PrivateTmp=true

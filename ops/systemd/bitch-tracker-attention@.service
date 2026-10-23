@@ -1,0 +1,9 @@
+[Unit]
+Description=Notify about a failed suite service (%i)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bb -cp %h/.local/lib/bitch-tracker -m bitch-tracker.infra.federation attention %i
+TimeoutStartSec=30
+NoNewPrivileges=true
+PrivateTmp=true

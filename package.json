@@ -17,7 +17,10 @@
     "lint": "pnpm run lint:clj",
     "test:cljs": "pnpm dlx shadow-cljs@3.4.11 compile test",
     "verify": "node scripts/verify-bd-export.mjs",
-    "test": "pnpm run lint:clj && pnpm run test:cljs && pnpm run build"
+    "test": "pnpm run lint:clj && pnpm run test:cljs && pnpm run build",
+    "suite:test": "bb -cp ops/src ops/test/federation_test.clj",
+    "suite:publish": "bb -cp ops/src -m bitch-tracker.infra.federation publish",
+    "suite:status": "bb -cp ops/src -m bitch-tracker.infra.federation fleet"
   },
   "dependencies": {
     "discord.js": "^14.16.3",

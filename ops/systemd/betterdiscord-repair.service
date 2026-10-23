@@ -1,0 +1,15 @@
+[Unit]
+Description=Restore BetterDiscord after Discord updates
+OnFailure=bitch-tracker-attention@%n.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+ExecCondition=/bin/sh -c 'state=$(/usr/local/bin/betterdiscordctl status) || exit 255; case "$state" in *"injected: no"*) exit 0;; *"injected: yes"*) exit 1;; *) echo "Unexpected betterdiscordctl status" >&2; exit 255;; esac'
+ExecStartPre=/usr/bin/test -s %h/.config/BetterDiscord/data/betterdiscord.asar
+ExecStart=/usr/local/bin/betterdiscordctl -D %h/.config/BetterDiscord/data install
+ExecStartPost=/usr/bin/notify-send --app-name=BetterDiscord BetterDiscord "Restored after a Discord update. If plugins are missing, restart Discord when convenient."
+TimeoutStartSec=30
+NoNewPrivileges=true
+PrivateTmp=true

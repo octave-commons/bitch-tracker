@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep this workstation on the shared stable suite release
+
+[Timer]
+OnStartupSec=45s
+OnUnitInactiveSec=5min
+RandomizedDelaySec=20s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

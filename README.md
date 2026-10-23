@@ -115,3 +115,19 @@ Source:
 Tests: `test/bitch_tracker/lens_test.cljs` and `lens_wire_test.cljs`. The latter runs the broker against an in-process fake Knoxx over real HTTP and WebSocket.
 
 `pnpm build` installs both plugin files into the BetterDiscord plugins directory. Set `BETTERDISCORD_COPY=0` to build without installing.
+
+## Federated workstation lifecycle
+
+Stealth and Yoga share a versioned suite release channel, automatic client
+updates, BetterDiscord repair, Ubuntu security updates and human-action notices.
+See [the operational profile](ops/README.md) for ownership, release publication,
+local-change protection, backups and per-host/fleet status.
+
+```sh
+pnpm suite:test
+pnpm suite:publish
+pnpm suite:status
+```
+
+A release must be published before peers can install it. Scheduled jobs never
+merge source checkouts or restart Discord/the computer without the operator.

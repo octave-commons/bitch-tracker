@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize enrolled workstation suite releases
+
+[Timer]
+OnStartupSec=1min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=20s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

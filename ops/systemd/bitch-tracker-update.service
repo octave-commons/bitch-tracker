@@ -1,0 +1,12 @@
+[Unit]
+Description=Apply the workstation suite release and report required human actions
+OnFailure=bitch-tracker-attention@%n.service
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bb -cp %h/.local/lib/bitch-tracker -m bitch-tracker.infra.federation check
+TimeoutStartSec=180
+NoNewPrivileges=true
+PrivateTmp=true
