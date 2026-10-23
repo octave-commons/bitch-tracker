@@ -1,7 +1,7 @@
 ---
 category: "tasks"
 labels: "knoxx-lens,betterdiscord,knoxx,cljs,tests"
-write-id: "1792467266606-0.kkcqp77b1y7h3juu0uq"
+write-id: "1792722802891-0.nadswo5kjebvety2v8b"
 points: "5"
 source: "kanban/2026-10-19-knoxx-lens-p0.md"
 title: "KnoxxLens P0: ask a Knoxx agent about the open Discord channel"
@@ -69,5 +69,9 @@ Blocked (Proxx):
 - local.ts:29 uses the global OLLAMA_BASE_URL rather than the route base URL.
 
 No live Knoxx turn has completed.
+
+2026-10-22: Recovered agy continuation 8f50f995. Live Proxx policy already has host chat capability and 120-second queue. Fixed stale bot Knoxx URL (localhost:8000 -> 127.0.0.1:18881) and restored deployment API key; saved PM2 state. Live socket ask with synthetic pinned context completed in 12.553s, run ec500e58-0674-4948-8620-0dc19d9f5662; follow-up run 3ddafa7d-c932-4f0f-a4e5-1b9b049fffe9 recalled the code in 14.531s without resending context. Proxx log daf993a5 confirms ollama-host, chat_completions, /v1/chat/completions, HTTP200. Upstream source policy+regressions committed in open-hax/proxx 4e91e84. Plugin tests 35/206 pass; Proxx CLJS 120/323 pass; release build zero warnings; new streaming/nonstreaming HTTP cases pass. Broader suite stalls in existing OpenAI Responses test, being checked separately. Preserved agy uncommitted plugin enhancements.
+
+Final verification: open-hax/proxx commits 4e91e84 (policy plus regressions), 320013e (evidence). Release build 0 warnings. Proxx CLJS 120 tests/323 assertions pass. Host chat regression: streaming and nonstreaming both pass. Broader HTTP suite 184 pass, 0 fail, 1 skipped stalled OpenAI Responses test; full suite is not green because that test hangs. Installed plugin suite 35/206 passes. Live two-turn synthetic verification and Proxx provider log are recorded in open-hax/proxx/docs/notes/knoxxlens-local-proxx.md. Bot repaired address/key persisted with PM2. No pushes or unrelated plugin source changes.
 
 ---
