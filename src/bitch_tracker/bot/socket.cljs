@@ -18,6 +18,7 @@
   []
   #js {"label_reactors" (js/Map.)
        "io" nil
+       "http_server" nil
        "discord_client" nil
        "op_state" nil
        "dedup_state" nil
@@ -278,19 +279,52 @@
               :botUserId (:bot-user-id (.-config state))
               :ts (u/now-iso)}))
 
+(defn- allowed-origin?
+  "Permits local clients and official Discord desktop origins while rejecting arbitrary browser origins."
+  [origin]
+  (or (nil? origin)
+      (= origin "null")
+      (str/starts-with? (str origin) "https://discord.com")
+      (str/starts-with? (str origin) "https://ptb.discord.com")
+      (str/starts-with? (str origin) "https://canary.discord.com")
+      (str/starts-with? (str origin) "http://localhost")
+      (str/starts-with? (str origin) "http://127.0.0.1")))
+
 (defn start!
-  "Starts the socket.io server on the configured port."
+  "Starts the socket.io server bound to the configured host (default 127.0.0.1) and port."
   [^js state config]
-  (let [^js io (new (.-Server socket-io) #js {:cors #js {:origin "*"}})]
-  (set! (.-io state) io)
-  (set! (.-config state) config)
-  (let [watchlist (cfg/load-watchlist)
-        entries (cfg/watch-entries watchlist)]
-    (set! (.-watchlist state) watchlist)
-    (js/console.log "[socket] Loaded" (count entries) "watchlist entries"))
-  (.on io "connection" (fn [^js socket] (on-connection! state socket)))
-    (.listen io (:socket-port config))
-    (js/console.log "[socket] Socket.io server listening on port" (:socket-port config))
+  (let [^js http (js/require "node:http")
+        server (.createServer http)
+        host (:socket-host config "127.0.0.1")
+        port (:socket-port config)
+        token (:socket-token config)
+        cors-opts #js {:origin (fn [origin callback]
+                                 (if (allowed-origin? origin)
+                                   (callback nil true)
+                                   (callback (js/Error. (str "CORS origin rejected: " origin)) false)))
+                       :methods #js ["GET" "POST"]}
+        ^js io (new (.-Server socket-io) server #js {:cors cors-opts})]
+    (set! (.-io state) io)
+    (set! (.-http_server state) server)
+    (set! (.-config state) config)
+    (when (seq token)
+      (.use io (fn [^js socket next-fn]
+                 (let [handshake (.-handshake socket)
+                       auth (and handshake (.-auth handshake))
+                       headers (and handshake (.-headers handshake))
+                       auth-token (or (and auth (aget auth "token"))
+                                      (and headers (aget headers "x-socket-token")))]
+                   (if (= token auth-token)
+                     (next-fn)
+                     (next-fn (js/Error. "Unauthorized socket connection")))))))
+    (let [watchlist (cfg/load-watchlist)
+          entries (cfg/watch-entries watchlist)]
+      (set! (.-watchlist state) watchlist)
+      (js/console.log "[socket] Loaded" (count entries) "watchlist entries"))
+    (.on io "connection" (fn [^js socket] (on-connection! state socket)))
+    (.listen server port host
+             (fn []
+               (js/console.log "[socket] Socket.io server listening on" (str host ":" port))))
     state))
 
 (defn stop!
@@ -299,4 +333,7 @@
   (when-let [^js io (.-io state)]
     (.close io)
     (set! (.-io state) nil))
+  (when-let [^js server (.-http_server state)]
+    (.close server)
+    (set! (.-http_server state) nil))
   state)

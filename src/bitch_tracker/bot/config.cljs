@@ -143,8 +143,10 @@
      :app-id                     app-id
      :bot-user-id                (env-or "BOT_USER_ID" (str (or (aget bot-json "botUserId") "")))
      :bot-username               (or (aget bot-json "username") "BitchTrackerBot")
-      :socket-port                (parse-int-env "BITCH_TRACKER_SOCKET_PORT" (or (aget bot-json "socketPort") policy/default-socket-port))
-      :tracker-channel-id         (env-or "TRACKER_CHANNEL_ID" (or (aget bot-json "trackerChannelId") policy/tracker-channel-id))
+     :socket-port                (parse-int-env "BITCH_TRACKER_SOCKET_PORT" (or (aget bot-json "socketPort") policy/default-socket-port))
+     :socket-host                (env-or "BITCH_TRACKER_SOCKET_HOST" (or (aget bot-json "socketHost") "127.0.0.1"))
+     :socket-token               (env-or "BITCH_TRACKER_SOCKET_TOKEN" (or (aget bot-json "socketToken") ""))
+     :tracker-channel-id         (env-or "TRACKER_CHANNEL_ID" (or (aget bot-json "trackerChannelId") policy/tracker-channel-id))
       :watch-channel-id           (env-or "WATCH_CHANNEL_ID" (or (aget bot-json "watchChannelId") policy/watch-channel-id))
       :label-threshold            (parse-int-env "LABEL_THRESHOLD" (or (aget bot-json "labelThreshold") policy/label-threshold))
      :flush-every-ms             (parse-int-env "FLUSH_EVERY_MS" policy/default-flush-every-ms)

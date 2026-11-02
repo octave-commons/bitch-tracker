@@ -34,28 +34,30 @@
 (defn ^:async flush!
   "Flushes queued events to the OpenPlanner events endpoint."
   [^js state config]
-  (when (.-flush_inflight state) (js/Promise.resolve nil))
-  (set! (.-flush_inflight state) true)
-  (try
-    (let [queue (.-queue state)
-          api-key (:openplanner-api-key config)]
-      (when (and (> (.-length queue) 0) (u/present-string? api-key))
-        (let [batch (.slice queue 0 (:max-batch-size config))]
-          (try
-            (let [res (await (js/fetch (endpoint config)
-                                       #js {:method "POST"
-                                            :headers #js {"content-type" "application/json"
-                                                          "authorization" (auth-header api-key)}
-                                            :body (js/JSON.stringify #js {:events batch})}))]
-              (if (.-ok res)
-                (do
-                  (.splice queue 0 (.-length batch))
-                  (js/console.log "[openplanner] Sent event batch" (.-length batch)))
-                (throw (js/Error. (str (.-status res) " " (.-statusText res))))))
-            (catch :default err
-              (js/console.warn "[openplanner] Flush failed; will retry" err))))))
-    (finally
-      (set! (.-flush_inflight state) false))))
+  (if (.-flush_inflight state)
+    nil
+    (do
+      (set! (.-flush_inflight state) true)
+      (try
+        (let [queue (.-queue state)
+              api-key (:openplanner-api-key config)]
+          (when (and (> (.-length queue) 0) (u/present-string? api-key))
+            (let [batch (.slice queue 0 (:max-batch-size config))]
+              (try
+                (let [res (await (js/fetch (endpoint config)
+                                           #js {:method "POST"
+                                                :headers #js {"content-type" "application/json"
+                                                              "authorization" (auth-header api-key)}
+                                                :body (js/JSON.stringify #js {:events batch})}))]
+                  (if (.-ok res)
+                    (do
+                      (.splice queue 0 (.-length batch))
+                      (js/console.log "[openplanner] Sent event batch" (.-length batch)))
+                    (throw (js/Error. (str (.-status res) " " (.-statusText res))))))
+                (catch :default err
+                  (js/console.warn "[openplanner] Flush failed; will retry" err))))))
+        (finally
+          (set! (.-flush_inflight state) false))))))
 
 (defn ^:async query-semantic-similar
   "Queries OpenPlanner for messages semantically similar to text, returning high-confidence hits."

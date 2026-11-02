@@ -5,7 +5,8 @@
             ["node:fs" :as fs]
             ["node:os" :as os]
             ["node:path" :as path]
-            [cljs.reader :as reader]))
+            [cljs.reader :as reader]
+            [clojure.string :as str]))
 
 (def ^:private state-edn-path
   (path/join (os/homedir) ".cache/desktop-index/state.edn"))
@@ -38,21 +39,29 @@
       [])))
 
 (defn focus-window!
-  "Focuses an i3 window by X11 window ID (wid) or container ID (conId)."
+  "Focuses an i3 window by strictly validated numeric X11 window ID (wid) or container ID (conId)."
   [wid-or-con-id]
   (js/Promise.
    (fn [res _reject]
-     (let [criteria (if (number? wid-or-con-id)
-                      (str "[id=\"" wid-or-con-id "\"]")
-                      (if (re-matches #"^\d+$" (str wid-or-con-id))
-                        (str "[id=\"" wid-or-con-id "\"]")
-                        (str "[con_id=\"" wid-or-con-id "\"]")))
-           cmd (str criteria " focus")]
-       (cp/execFile "i3-msg" #js [cmd]
-                    (fn [err stdout stderr]
-                      (if err
-                        (res {:ok false :error (or (when stderr (str stderr)) (ex-message err))})
-                        (res {:ok true :output (str stdout)}))))))))
+     (let [safe-id (cond
+                     (number? wid-or-con-id)
+                     (when (and (int? wid-or-con-id) (pos? wid-or-con-id))
+                       (str (int wid-or-con-id)))
+
+                     (string? wid-or-con-id)
+                     (let [trimmed (str/trim wid-or-con-id)]
+                       (when (re-matches #"^[0-9]{1,16}$" trimmed)
+                         trimmed))
+
+                     :else nil)]
+       (if-not safe-id
+         (res {:ok false :error "Invalid window or container ID: must be a positive integer"})
+         (let [cmd (str "[id=\"" safe-id "\"] focus")]
+           (cp/execFile "i3-msg" #js [cmd]
+                        (fn [err stdout stderr]
+                          (if err
+                            (res {:ok false :error (or (when stderr (str stderr)) (ex-message err))})
+                            (res {:ok true :output (str stdout)}))))))))))
 
 (defn ^:async ocr-image!
   "Submits a base64-encoded image to the local Intel NPU OCR service."

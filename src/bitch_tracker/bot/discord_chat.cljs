@@ -95,19 +95,25 @@
               (knoxx/close-stream! ws)
               (.reply msg (str "⚠️ Turn refused: " (or (get-in start-res [:body :error]) "unknown error"))))
             ;; Wait for stream completion up to 45s
-            (let [start-ts (js/Date.now)]
-              (js/setInterval
-               (fn [interval-id]
-                 (when (or @completed? (> (- (js/Date.now) start-ts) 45000))
-                   (js/clearInterval interval-id)
-                   (knoxx/close-stream! ws)
-                   (let [final-text (str/trim @accum-text)
-                         reply-text (if (str/blank? final-text)
-                                      "Received empty response from Knoxx agent."
-                                      final-text)]
-                     (doseq [msg-chunk (u/discord-message-chunks reply-text)]
-                       (.reply msg msg-chunk)))))
-               500))))
+            (let [start-ts (js/Date.now)
+                  interval-handle (atom nil)
+                  replied? (atom false)]
+              (reset! interval-handle
+                      (js/setInterval
+                       (fn []
+                         (when (and (not @replied?)
+                                    (or @completed? (> (- (js/Date.now) start-ts) 45000)))
+                           (reset! replied? true)
+                           (when-let [h @interval-handle]
+                             (js/clearInterval h))
+                           (knoxx/close-stream! ws)
+                           (let [final-text (str/trim @accum-text)
+                                 reply-text (if (str/blank? final-text)
+                                              "Received empty response from Knoxx agent."
+                                              final-text)]
+                             (doseq [msg-chunk (u/discord-message-chunks reply-text)]
+                               (.reply msg msg-chunk)))))
+                       500)))))
         (catch :default err
           (js/console.error "[discord-chat] Turn error:" (.-message err))
           (.reply msg (str "❌ Failed to query Knoxx: " (.-message err))))))))

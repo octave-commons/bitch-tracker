@@ -63,7 +63,7 @@
              ^js ws (js/WebSocket. ws-url "govone.realtime.v1")
              timer (js/setTimeout (fn []
                                     (try (.close ws) (catch :default _ nil))
-                                    (res {:ok true :warning "ws timeout"}))
+                                    (res {:ok false :error "WebSocket timeout: DEK termination unconfirmed"}))
                                   4000)]
          (.addEventListener ws "open"
                             (fn []
@@ -74,10 +74,21 @@
                                                             :action "terminate"
                                                             :reason "extraction completed; crypto-shred session DEK"}}))))
          (.addEventListener ws "message"
-                            (fn [^js _evt]
+                            (fn [^js evt]
                               (js/clearTimeout timer)
                               (try (.close ws) (catch :default _ nil))
-                              (res {:ok true :action "terminate"})))
+                              (let [data (.-data evt)
+                                    parsed (u/parse-json data nil)
+                                    msg-type (when parsed (aget parsed "type"))
+                                    payload (when parsed (aget parsed "payload"))
+                                    action (when payload (aget payload "action"))
+                                    status (when payload (aget payload "status"))]
+                                (if (or (= action "terminate")
+                                        (= status "terminated")
+                                        (= status "acknowledged")
+                                        (= msg-type "intervention_ack"))
+                                  (res {:ok true :status "terminated" :action "terminate"})
+                                  (res {:ok false :error (str "Unexpected termination response: " data)})))))
          (.addEventListener ws "error"
                             (fn [err]
                               (js/clearTimeout timer)
@@ -86,14 +97,14 @@
          (res {:ok false :error (.-message err)}))))))
 
 (defn ^:async extract-and-sanitize!
-  "Executes the full GovOne extraction workflow:
+  "Executes the full GovOne extraction workflow with fail-closed guarantees:
    1. Ingests raw Discord text into an ephemeral GovOne session
    2. Classifies mentions, IDs, and PII
-   3. Redacts into [[ENTITY_N]] placeholders
-   4. Runs output inspection gate
-   5. Requests masked rehydration
-   6. Retrieves auditor Merkle evidence proof
-   7. Terminates session and crypto-shreds session DEK via WebSocket intervention"
+   3. Redacts into [[ENTITY_N]] placeholders (fails closed if redaction fails)
+   4. Runs output inspection gate (fails closed if inspection rejects)
+   5. Requests masked rehydration (fails closed if rehydration fails)
+   6. Retrieves auditor Merkle evidence proof (without substituting zeroes)
+   7. Terminates session and crypto-shreds session DEK via verified WebSocket intervention"
   [config text]
   (let [token (:govone-lens-token config)
         cls (extract-discord-entities text)]
@@ -109,34 +120,40 @@
                                          :messages [{:role "user" :content text}]
                                          :classifications cls}
                                         token))
-                redacted (get-in r-res [:body :redacted_messages 0 :content] text)
-                entities (get-in r-res [:body :entities] [])
-                resp-id (str "resp-" (js/Date.now))
-                _i-res (await (call-api! config "POST" "/api/v1/inspect"
-                                        {:session_id session-id
-                                         :response_id resp-id
-                                         :model_output redacted}
-                                        token))
-                m-res (await (call-api! config "POST" "/api/v1/rehydrate"
-                                        {:session_id session-id
-                                         :response_id resp-id
-                                         :variant "masked"}
-                                        token))
-                sanitized (get-in m-res [:body :rehydrated_content] redacted)
-                e-res (await (call-api! config "GET" (str "/api/v1/evidence/" session-id)
-                                        nil
-                                        token))
-                evidence (get-in e-res [:body :events] [])
-                merkle-root (or (get-in e-res [:body :merkle_root]) "0x0000000000000000000000000000000000000000")
-                term (await (terminate-session-dek! config session-id token))]
-            {:ok true
-             :session_id session-id
-             :sanitized_text sanitized
-             :entities entities
-             :classifications cls
-             :merkle_root merkle-root
-             :evidence_count (count evidence)
-             :dek_shredded (:ok term true)})))
+                redacted (get-in r-res [:body :redacted_messages 0 :content])]
+            (if (or (not (:ok r-res)) (str/blank? (str redacted)))
+              {:ok false :error (or (get-in r-res [:body :error]) "GovOne redaction failed: refusal to return unredacted text")}
+              (let [entities (get-in r-res [:body :entities] [])
+                    resp-id (str "resp-" (js/Date.now))
+                    i-res (await (call-api! config "POST" "/api/v1/inspect"
+                                            {:session_id session-id
+                                             :response_id resp-id
+                                             :model_output redacted}
+                                            token))]
+                (if-not (:ok i-res)
+                  {:ok false :error (or (get-in i-res [:body :error]) "GovOne inspection gate failed")}
+                  (let [m-res (await (call-api! config "POST" "/api/v1/rehydrate"
+                                                {:session_id session-id
+                                                 :response_id resp-id
+                                                 :variant "masked"}
+                                                token))
+                        sanitized (get-in m-res [:body :rehydrated_content])]
+                    (if (or (not (:ok m-res)) (str/blank? (str sanitized)))
+                      {:ok false :error (or (get-in m-res [:body :error]) "GovOne rehydration failed: refusal to return unmasked text")}
+                      (let [e-res (await (call-api! config "GET" (str "/api/v1/evidence/" session-id)
+                                                    nil
+                                                    token))
+                            evidence (get-in e-res [:body :events] [])
+                            merkle-root (get-in e-res [:body :merkle_root])
+                            term (await (terminate-session-dek! config session-id token))]
+                        {:ok true
+                         :session_id session-id
+                         :sanitized_text sanitized
+                         :entities entities
+                         :classifications cls
+                         :merkle_root merkle-root
+                         :evidence_count (count evidence)
+                         :dek_shredded (:ok term false)})))))))))
       (catch :default err
         {:ok false :error (.-message err)}))))
 
