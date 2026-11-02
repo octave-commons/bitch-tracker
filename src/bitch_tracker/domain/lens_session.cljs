@@ -1,7 +1,9 @@
 (ns bitch-tracker.domain.lens-session
   "Per-channel KnoxxLens conversation state, tool-receipt folding, and past-session hydration.
   No I/O. A conversation is {:conversation-id :session-id :turns [...] :running-request}."
-  (:require [clojure.string :as str]))
+  (:require [bitch-tracker.domain.lens-context :as ctx]
+            [bitch-tracker.domain.lens-topics :as topics]
+            [clojure.string :as str]))
 
 (defn new-conversation
   "Returns an empty conversation bound to a fresh Knoxx conversation id."
@@ -9,6 +11,7 @@
   {:conversation-id conversation-id
    :session-id nil
    :turns []
+   :sent-event-ids #{}
    :running-request nil})
 
 (defn running?
@@ -18,17 +21,20 @@
 
 (defn begin-turn
   "Appends the user's question and a pending assistant turn tagged with request-id."
-  [conversation request-id question context-labels]
-  (-> conversation
-      (update :turns conj
-              {:role :user :text question :context context-labels}
-              {:role :assistant
-               :request-id request-id
-               :text ""
-               :status :pending
-               :events []
-               :tool-receipts []})
-      (assoc :running-request request-id)))
+  ([conversation request-id question context-labels]
+   (begin-turn conversation request-id question context-labels nil))
+  ([conversation request-id question context-labels event-ids]
+   (-> conversation
+       (update :turns conj
+               {:role :user :text question :context context-labels}
+               {:role :assistant
+                :request-id request-id
+                :text ""
+                :status :pending
+                :events []
+                :tool-receipts []})
+       (update :sent-event-ids #(into (set (or % #{})) (remove str/blank? (map str event-ids))))
+       (assoc :running-request request-id))))
 
 (defn- update-turn [conversation request-id f]
   (update conversation :turns
@@ -114,25 +120,150 @@
             r))
         (vec (or receipts []))))
 
+(defn- ascii-alnum-lower
+  [ch]
+  (let [c (.charCodeAt ch 0)]
+    (cond
+      (and (>= c 48) (<= c 57)) ch
+      (and (>= c 65) (<= c 90)) (js/String.fromCharCode (+ c 32))
+      (and (>= c 97) (<= c 122)) ch
+      :else nil)))
+
+(defn- index-alnum
+  [s]
+  (let [n (count s)]
+    (loop [i 0
+           idxs (transient [])
+           chs (transient [])]
+      (if (>= i n)
+        {:idxs (persistent! idxs)
+         :norm (apply str (persistent! chs))}
+        (let [ch (.charAt s i)]
+          (if-let [lc (ascii-alnum-lower ch)]
+            (recur (inc i) (conj! idxs i) (conj! chs lc))
+            (recur (inc i) idxs chs)))))))
+
+(defn- rewind-markdown-prefix
+  "Walks backwards from the first alphanumeric char of the second pass over
+   leading Markdown heading/emphasis/emoji characters (`### ⚡ `) without
+   crossing into the end of the first pass (`</suggestions>` or sentence punctuation)."
+  [s alnum-start]
+  (loop [i alnum-start]
+    (if (<= i 0)
+      0
+      (let [prev (.charAt s (dec i))]
+        (if (or (= "\n" prev)
+                (= "\r" prev)
+                (= ">" prev)
+                (some? (ascii-alnum-lower prev))
+                (contains? #{"." "!" "?" ")" "]" "\"" "'" "`"} prev))
+          i
+          (recur (dec i)))))))
+
 (defn dedupe-assistant-text
-  "If a string contains an unformatted streaming pass immediately followed by a
-  formatted pass with identical alphanumeric content, returns the formatted pass."
+  "If `text` contains an unformatted/newline-stripped streaming pass immediately
+   followed by a formatted pass with matching alphanumeric content, returns only
+   the formatted pass. Works even when spaces, newlines, or intermediate `###`
+   markers differed between the two passes."
   [text]
-  (let [s (str (or text ""))
-        len (count s)]
-    (if (< len 80)
+  (let [s (str (or text ""))]
+    (if (< (count s) 72)
       s
-      (let [prefix (subs s 0 36)
-            second-idx (str/index-of s prefix 36)]
-        (if (and (number? second-idx)
-                 (>= second-idx (quot len 3)))
-          (let [first-half (subs s 0 second-idx)
-                second-half (subs s second-idx)
-                norm (fn [x] (str/lower-case (str/replace x #"[^a-zA-Z0-9]+" "")))]
-            (if (= (norm first-half) (norm second-half))
-              second-half
-              s))
-          s)))))
+      (let [{:keys [idxs norm]} (index-alnum s)
+            norm-len (count norm)]
+        (if (< norm-len 48)
+          s
+          (let [anchor-len (min 24 (quot norm-len 3))
+                anchor (subs norm 0 anchor-len)
+                search-from (max anchor-len (quot norm-len 3))
+                second-norm-idx (str/index-of norm anchor search-from)]
+            (if (number? second-norm-idx)
+              (let [n1 (subs norm 0 second-norm-idx)
+                    n2 (subs norm second-norm-idx)
+                    cmp-len (min (count n1) (count n2) 64)
+                    prefix-match? (and (>= cmp-len 24)
+                                       (= (subs n1 0 cmp-len) (subs n2 0 cmp-len)))]
+                (if prefix-match?
+                  (subs s (rewind-markdown-prefix s (nth idxs second-norm-idx)))
+                  s))
+              s)))))))
+
+(defn- parse-tag-attrs [attr-str]
+  (into {}
+        (map (fn [[_ k v]] [(keyword k) v]))
+        (re-seq #"([a-zA-Z_-]+)=\"([^\"]*)\"" (str attr-str))))
+
+(defn- extract-receipts-refined-topics
+  [receipts]
+  (some (fn [{:keys [tool output-preview]}]
+          (when (str/includes? (str tool) "lens_refine_topics")
+            (topics/parse-refined-topics output-preview)))
+        (reverse (or receipts []))))
+
+(defn- merge-grabbed-items
+  [existing incoming]
+  (->> (concat (or existing []) (or incoming []))
+       (reduce (fn [acc item]
+                 (if (some #(= (:event-id item) (:event-id %)) acc)
+                   acc
+                   (conj acc item)))
+               [])))
+
+(defn- extract-receipts-grabbed-context
+  [receipts]
+  (->> (or receipts [])
+       (keep (fn [{:keys [tool output-preview]}]
+               (when (str/includes? (str tool) "lens_grab_context")
+                 (ctx/parse-grabbed-context output-preview))))
+       (reduce merge-grabbed-items [])
+       not-empty))
+
+(defn extract-turn-artifacts
+  "Extracts `<draft_message ...>...</draft_message>`, `<suggestions>...</suggestions>`,
+  `<refined_topics>...</refined_topics>`, and `<grabbed_context>...</grabbed_context>`
+  envelopes from assistant text, returning `{:text :suggestions :drafts :refined-topics :grabbed-context}`
+  with XML envelopes (and partial streaming tails) stripped from `:text`."
+  [raw-text]
+  (let [s (str (or raw-text ""))
+        draft-matches (vec (re-seq #"(?i)<\s*draft_message\b([^>]*)>([\s\S]*?)<\s*/\s*draft_message\s*>" s))
+        drafts (->> draft-matches
+                    (keep-indexed
+                     (fn [idx [_ attr-str body]]
+                       (let [clean-body (str/trim (str body))
+                             attrs (parse-tag-attrs attr-str)]
+                         (when (seq clean-body)
+                           {:id (str "draft-" (inc idx))
+                            :channel (:channel attrs)
+                            :reply-to (:reply_to attrs)
+                            :text clean-body}))))
+                    vec)
+        sugg-matches (vec (re-seq #"(?i)<\s*suggestions\b[^>]*>([\s\S]*?)<\s*/\s*suggestions\s*>" s))
+        suggestions (->> sugg-matches
+                         (mapcat (fn [[_ body]] (str/split-lines (str body))))
+                         (map (fn [line]
+                                (-> line
+                                    str/trim
+                                    (str/replace #"^(?:[-*•]|\d+[.)])\s*" "")
+                                    (str/replace #"^\"|\"$" "")
+                                    str/trim)))
+                         (filter #(and (>= (count %) 6) (<= (count %) 160)))
+                         distinct
+                         (take 4)
+                         vec)
+        refined-topics (topics/parse-refined-topics s)
+        grabbed-context (ctx/parse-grabbed-context s)
+        cleaned (-> s
+                    (str/replace #"(?i)<\s*draft_message\b[^>]*>[\s\S]*?<\s*/\s*draft_message\s*>\s*" "\n\n")
+                    (str/replace #"(?i)<\s*refined_topics\b[^>]*>[\s\S]*?<\s*/\s*refined_topics\s*>\s*" "")
+                    (str/replace #"(?i)<\s*grabbed_context\b[^>]*>[\s\S]*?<\s*/\s*grabbed_context\s*>\s*" "")
+                    (str/replace #"(?i)<\s*suggestions\b[^>]*>[\s\S]*?<\s*/\s*suggestions\s*>\s*" "")
+                    (str/replace #"(?i)<\s*(?:suggestions|draft_message|refined_topics|grabbed_context)\b[\s\S]*$" "")
+                    str/trim)]
+    (cond-> {:text cleaned
+             :suggestions suggestions
+             :drafts drafts}
+      (seq refined-topics) (assoc :refined-topics refined-topics)
+      (seq grabbed-context) (assoc :grabbed-context grabbed-context))))
 
 (defn apply-reply
   "Applies a bot reply to the turn with request-id.
@@ -141,26 +272,66 @@
   (case kind
     :accepted (cond-> (update-turn conversation request-id #(assoc % :status :streaming :model (:model data)))
                 (not (str/blank? (:sessionId data))) (assoc :session-id (:sessionId data)))
-    :token (update-turn conversation request-id #(-> % (assoc :status :streaming) (update :text str (:token data))))
+    :token (update-turn conversation request-id
+                        (fn [turn]
+                          (let [raw (str (or (:raw-text turn) (:text turn) "") (:token data))
+                                deduped (dedupe-assistant-text raw)
+                                {:keys [text suggestions drafts refined-topics grabbed-context]} (extract-turn-artifacts deduped)
+                                merged-grabbed (merge-grabbed-items (:grabbed-context turn) grabbed-context)]
+                            (cond-> (assoc turn
+                                           :status :streaming
+                                           :raw-text raw
+                                           :text text)
+                              (seq suggestions) (assoc :suggestions suggestions)
+                              (seq drafts) (assoc :drafts drafts)
+                              (seq refined-topics) (assoc :refined-topics refined-topics)
+                              (seq merged-grabbed) (assoc :grabbed-context merged-grabbed)))))
     :event (update-turn conversation request-id
                         (fn [turn]
-                          (-> turn
-                              (update :events (fnil conj []) (select-keys data [:type :tool :toolCallId :preview :status :isError]))
-                              (update :tool-receipts fold-tool-event data))))
+                          (let [receipts' (fold-tool-event (:tool-receipts turn) data)
+                                refined (or (when (str/includes? (str (:tool data)) "lens_refine_topics")
+                                              (topics/parse-refined-topics (:preview data)))
+                                            (extract-receipts-refined-topics receipts'))
+                                grabbed (merge-grabbed-items
+                                         (:grabbed-context turn)
+                                         (or (when (str/includes? (str (:tool data)) "lens_grab_context")
+                                               (ctx/parse-grabbed-context (:preview data)))
+                                             (extract-receipts-grabbed-context receipts')))]
+                            (cond-> (-> turn
+                                        (update :events (fnil conj []) (select-keys data [:type :tool :toolCallId :preview :status :isError]))
+                                        (assoc :tool-receipts receipts'))
+                              (seq refined) (assoc :refined-topics refined)
+                              (seq grabbed) (assoc :grabbed-context grabbed)))))
     :done (-> conversation
               (update-turn request-id (fn [turn]
-                                        (let [candidate (if (> (count (str (:text data))) (count (:text turn)))
+                                        (let [streamed (or (:raw-text turn) (:text turn) "")
+                                              candidate (if (> (count (str (:text data))) (count streamed))
                                                           (str (:text data))
-                                                          (:text turn))]
-                                          (-> turn
-                                              (assoc :status :done
-                                                     :text (dedupe-assistant-text candidate))
-                                              (update :tool-receipts finalize-receipts :done)))))
+                                                          streamed)
+                                              deduped (dedupe-assistant-text candidate)
+                                              receipts' (finalize-receipts (:tool-receipts turn) :done)
+                                              {:keys [text suggestions drafts refined-topics grabbed-context]} (extract-turn-artifacts deduped)
+                                              all-refined (or refined-topics
+                                                              (extract-receipts-refined-topics receipts')
+                                                              (:refined-topics turn))
+                                              all-grabbed (-> (:grabbed-context turn)
+                                                              (merge-grabbed-items (extract-receipts-grabbed-context receipts'))
+                                                              (merge-grabbed-items grabbed-context))]
+                                          (cond-> (-> turn
+                                                      (dissoc :raw-text)
+                                                      (assoc :status :done
+                                                             :text text
+                                                             :tool-receipts receipts'))
+                                            (seq suggestions) (assoc :suggestions suggestions)
+                                            (seq drafts) (assoc :drafts drafts)
+                                            (seq all-refined) (assoc :refined-topics all-refined)
+                                            (seq all-grabbed) (assoc :grabbed-context all-grabbed)))))
               (settle request-id))
     :error (-> conversation
                (update-turn request-id
                             (fn [turn]
                               (-> turn
+                                  (dissoc :raw-text)
                                   (assoc :status :error :error (str (:error data)))
                                   (update :tool-receipts finalize-receipts :error))))
                (settle request-id))
@@ -171,9 +342,7 @@
 ;; ─────────────────────────────────────────────────────────────
 
 (defn- parse-context-tag-attrs [tag]
-  (into {}
-        (map (fn [[_ k v]] [(keyword k) v]))
-        (re-seq #"([a-zA-Z_]+)=\"([^\"]*)\"" (str tag))))
+  (parse-tag-attrs tag))
 
 (defn- context-attrs->label [{:keys [channel kind messages event_id]}]
   (let [ch (if (str/blank? channel) "#" (str "#" (str/replace channel #"^#" "")))]
@@ -304,7 +473,11 @@
                                             acc))
                                         []
                                         group))
-              asst-text (dedupe-assistant-text (or (:text asst-row) ""))
+              asst-deduped (dedupe-assistant-text (or (:text asst-row) ""))
+              {asst-text :text asst-suggestions :suggestions asst-drafts :drafts asst-refined :refined-topics asst-grabbed :grabbed-context}
+              (extract-turn-artifacts asst-deduped)
+              refined-topics (or asst-refined (extract-receipts-refined-topics folded-receipts))
+              grabbed-context (merge-grabbed-items asst-grabbed (extract-receipts-grabbed-context folded-receipts))
               model (or (:model asst-row) (:model run-row) (get-in run-row [:extra :model]))]
           (cond-> []
             (or (seq text) asst-row)
@@ -312,24 +485,33 @@
                    :text (if (str/blank? text) "(Question)" text)
                    :context context})
 
-            (or (seq asst-text) err-row (seq folded-receipts))
+            (or (seq asst-text) err-row (seq folded-receipts) (seq asst-drafts))
             (conj (cond-> {:role :assistant
                            :request-id (str run-id)
                            :text asst-text
                            :status (if err-row :error :done)
                            :events (mapv (fn [r] {:type "tool_end" :tool (:tool r)}) folded-receipts)
                            :tool-receipts folded-receipts}
+                    (seq asst-suggestions) (assoc :suggestions asst-suggestions)
+                    (seq asst-drafts) (assoc :drafts asst-drafts)
+                    (seq refined-topics) (assoc :refined-topics refined-topics)
+                    (seq grabbed-context) (assoc :grabbed-context grabbed-context)
                     model (assoc :model model)
                     err-row (assoc :error (:text err-row)))))))
       (:order run-groups)))))
 
 (defn interactive-remote-session?
   "Returns true when a Knoxx session summary row represents an interactive user/lens
-  session rather than a background cron/schedule/patrol trigger."
+  session rather than a background cron/schedule/patrol trigger or autonomous
+  `discord_automation` bot session."
   [row]
   (let [session-id (str (or (:session row) ""))
-        title (str (or (:title row) ""))]
+        title (str (or (:title row) ""))
+        actor-id (str (or (:actor_id row) (:actorId row) ""))
+        contract-id (str (or (:contract_id row) (:contractId row) ""))]
     (and (not (str/blank? session-id))
+         (not= "discord_automation" actor-id)
+         (not (str/starts-with? contract-id "ussyverse_social_"))
          (not (str/starts-with? session-id "trigger-"))
          (not (str/starts-with? session-id "translation-"))
          (not (str/starts-with? title "event: schedule/"))

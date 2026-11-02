@@ -161,16 +161,25 @@
 ;; Discord event handlers
 ;; ─────────────────────────────────────────────────────────────
 
+(defn- guild-name-for [state guild-id]
+  (when (u/present-string? guild-id)
+    (some-> (u/jcall (state-get state "guildStore") "getGuild" guild-id)
+            (u/jget "name")
+            str
+            str/trim
+            not-empty)))
+
 (defn- forward-message! [state message fallback-channel-id historical?]
   (let [message-id (u/jget message "id")
         channel-id (or (u/jget message "channel_id") (u/jget message "channelId") fallback-channel-id)]
     (when (and message-id channel-id (not= (u/jget message "state") "SENDING") (not= (u/jget message "type") 8))
       (let [channel (channel-for state channel-id)
-            guild-id (guild-id-for state message channel nil)]
+            guild-id (guild-id-for state message channel nil)
+            guild-name (guild-name-for state guild-id)]
         ;; No self-filter: forward all authors, including the logged-in account.
         ;; Loop-safe — the bot ignores events authored by its own bot-user-id.
         (when-let [socket-state (state-get state "socket-state")]
-          (let [ev (events/message-to-event message channel guild-id (bot-config-set state "knownLabelUserIds"))]
+          (let [ev (events/message-to-event message channel guild-id (bot-config-set state "knownLabelUserIds") guild-name)]
             (when (and historical? (u/jget ev "extra"))
               (aset (u/jget ev "extra") "historical" true))
             (socket/send-event! socket-state ev)))))))

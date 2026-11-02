@@ -2,6 +2,7 @@
   (:require [bitch-tracker.bot.config :as cfg]
             [bitch-tracker.bot.dedup :as dedup]
             [bitch-tracker.bot.discord :as discord]
+            [bitch-tracker.bot.discord-chat :as discord-chat]
             [bitch-tracker.bot.openplanner :as op]
             [bitch-tracker.bot.socket :as socket]))
 
@@ -30,6 +31,7 @@
       (op/start-timers! op-state config)
       (socket/start! socket-state config)
       (socket/notify-bot-online! socket-state config)
+      (discord-chat/setup-chat-listeners! discord-client config)
       (reset! state {:socket-state socket-state
                      :op-state op-state
                      :dedup-state dedup-state

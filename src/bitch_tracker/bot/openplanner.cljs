@@ -82,6 +82,61 @@
           (js/console.warn "[openplanner] Semantic query failed" err)
           #js [])))))
 
+(defn ^:async query-graph-memory!
+  "Queries OpenPlanner's /v1/graph/memory for a semantic + structural neighborhood."
+  [config {:keys [q k lakes node-types max-nodes]}]
+  (let [api-key (:openplanner-api-key config)
+        base-url (:openplanner-base-url config)]
+    (if (str/blank? api-key)
+      {:ok false :status 401 :body {:error "OPENPLANNER_API_KEY is not configured"}}
+      (try
+        (let [payload (cond-> {:q (str (or q ""))
+                               :k (max 1 (min 24 (or k 10)))
+                               :maxNodes (max 8 (min 80 (or max-nodes 36)))
+                               :maxCandidates 300
+                               :includeText true}
+                        (seq lakes) (assoc :lakes (vec lakes))
+                        (seq node-types) (assoc :nodeTypes (vec node-types)))
+              res (await (js/fetch (str base-url "/v1/graph/memory")
+                                   #js {:method "POST"
+                                        :headers #js {"content-type" "application/json"
+                                                      "authorization" (auth-header api-key)}
+                                        :body (js/JSON.stringify (clj->js payload))}))
+              text (await (.text res))
+              parsed (u/parse-json text nil)]
+          {:ok (.-ok res)
+           :status (.-status res)
+           :body (if parsed (js->clj parsed :keywordize-keys true) {:raw text})})
+        (catch :default err
+          {:ok false :status 500 :body {:error (.-message err)}})))))
+
+(defn ^:async query-graph-connections!
+  "Queries OpenPlanner's /v1/graph/connections for a multi-hop subgraph
+   pre-rendered for WebGL with 2D golden-spiral coordinates and people bridges."
+  [config {:keys [query lakes max-nodes include-desktop seed-node-ids]}]
+  (let [api-key (:openplanner-api-key config)
+        base-url (:openplanner-base-url config)]
+    (if (str/blank? api-key)
+      {:ok false :status 401 :body {:error "OPENPLANNER_API_KEY is not configured"}}
+      (try
+        (let [payload (cond-> {:query (str (or query ""))
+                               :max_nodes (max 10 (min 200 (or max-nodes 50)))
+                               :include_desktop (boolean (if (some? include-desktop) include-desktop true))}
+                        (seq lakes) (assoc :lakes (vec lakes))
+                        (seq seed-node-ids) (assoc :seed_node_ids (vec seed-node-ids)))
+              res (await (js/fetch (str base-url "/v1/graph/connections")
+                                   #js {:method "POST"
+                                        :headers #js {"content-type" "application/json"
+                                                      "authorization" (auth-header api-key)}
+                                        :body (js/JSON.stringify (clj->js payload))}))
+              text (await (.text res))
+              parsed (u/parse-json text nil)]
+          {:ok (.-ok res)
+           :status (.-status res)
+           :body (if parsed (js->clj parsed :keywordize-keys true) {:raw text})})
+        (catch :default err
+          {:ok false :status 500 :body {:error (.-message err)}})))))
+
 (defn ^:async run-semantic-scan!
   "Checks pending message ids for existing embeddings and clears them from the pending set."
   [^js state config]

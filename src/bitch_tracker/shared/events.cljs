@@ -114,92 +114,99 @@
 
 (defn message-to-event
   "Convert a Discord message into an OpenPlanner event map."
-  [message channel guild-id known-label-user-ids]
-  (let [author (or (u/jget message "author") #js {})
-        aid (str (or (u/jget author "id") (u/jget message "author_id") "unknown"))
-        channel-id (str (or (u/jget message "channel_id") (u/jget message "channelId") (u/jget channel "id") ""))
-        channel-name (u/jget channel "name")
-        message-id (str (or (u/jget message "id") ""))
-        content (if (string? (u/jget message "content")) (u/jget message "content") "")
-        attachments (mapv (fn [a]
-                            {:id (str (or (u/jget a "id") ""))
-                             :filename (or (u/jget a "filename") (u/jget a "name"))
-                             :content_type (or (u/jget a "content_type") (u/jget a "contentType"))
-                             :size (u/jget a "size")
-                             :url (u/jget a "url")
-                             :proxy_url (or (u/jget a "proxy_url") (u/jget a "proxyURL"))
-                             :width (u/jget a "width")
-                             :height (u/jget a "height")})
-                          (u/js-values (u/jget message "attachments")))
-        embeds (mapv (fn [e]
-                       {:type (u/jget e "type")
-                        :title (u/jget e "title")
-                        :description (u/jget e "description")
-                        :url (u/jget e "url")
-                        :provider (u/jget e "provider" "name")})
-                     (u/js-values (u/jget message "embeds")))
-        mention-users (mention-user-records message)
-        mentions (->> (concat (ids (u/jget message "mentions"))
-                              (extract-user-mentions content))
-                      (remove str/blank?)
-                      distinct
-                      vec)
-        mention-channels (extract-channel-mentions content)
-        urls (->> (concat (extract-urls content)
-                          (keep :url attachments)
-                          (keep :url embeds))
-                  (remove str/blank?)
-                  distinct
-                  vec)
-        reply-ref (reply-reference message)
-        ts (message-timestamp message)
-        labels (cond-> []
-                 (contains? known-label-user-ids aid) (conj "moderation-watch:known-user" (str "moderation-watch:user:" aid)))]
-    (clj->js {:schema "openplanner.event.v1"
-              :schema_version 1
-              :id (str "discord:" guild-id ":" channel-id ":" message-id)
-              :ts ts
-              :source "betterdiscord-openplanner"
-              :kind "discord.message"
-              :source_ref {:project c/default-project
-                           :session guild-id
-                           :message message-id}
-              :text (or (not-empty content)
-                        (not-empty (str/join "\n" (keep :url attachments)))
-                        (not-empty (str/join "\n" (keep :url embeds)))
-                        "")
-              :meta {:author (or (u/jget author "username") (u/jget author "globalName") aid)
-                     :author_id aid
-                     :author_username (u/jget author "username")
-                     :author_global_name (u/jget author "globalName")
-                     :bot (boolean (u/jget author "bot"))
-                     :tags (cond-> ["discord" "message"]
-                             (contains? known-label-user-ids aid) (into ["known-watch-user" "moderation-watch"]))}
-              :extra (cond-> {:guild_id guild-id
-                              :channel_id channel-id
-                              :channel_name channel-name
-                              :message_id message-id
-                              :nonce (u/jget message "nonce")
-                              :type (u/jget message "type")
-                              :flags (u/jget message "flags")
-                              :pinned (boolean (u/jget message "pinned"))
-                              :tts (boolean (u/jget message "tts"))
-                              :mention_everyone (boolean (u/jget message "mention_everyone"))
-                              :mentions mentions
-                              :mention_users mention-users
-                              :mention_channels mention-channels
-                              :mention_roles (ids (u/jget message "mention_roles"))
-                              :urls urls
-                              :attachments attachments
-                              :embeds embeds
-                              :edited_timestamp (u/jget message "edited_timestamp")}
-                       (some? reply-ref) (assoc :reply_to reply-ref
-                                                :reply_to_message_id (:message_id reply-ref))
-                       (some? (:author_id reply-ref)) (assoc :reply_to_author_id (:author_id reply-ref))
-                       (seq labels) (assoc :openplanner_labels {:claim_system "discord-moderation-watch-v1"
-                                                                :labels (vec (distinct labels))
-                                                                :updated_at (u/now-iso)})
-                       (contains? known-label-user-ids aid) (assoc :is_known_watch_user true))})))
+  ([message channel guild-id known-label-user-ids]
+   (message-to-event message channel guild-id known-label-user-ids nil))
+  ([message channel guild-id known-label-user-ids guild-name]
+   (let [author (or (u/jget message "author") #js {})
+         aid (str (or (u/jget author "id") (u/jget message "author_id") "unknown"))
+         channel-id (str (or (u/jget message "channel_id") (u/jget message "channelId") (u/jget channel "id") ""))
+         channel-name (u/jget channel "name")
+         eff-guild-name (some-> (or guild-name (u/jget channel "guild_name") (u/jget channel "guildName"))
+                                str
+                                str/trim
+                                not-empty)
+         message-id (str (or (u/jget message "id") ""))
+         content (if (string? (u/jget message "content")) (u/jget message "content") "")
+         attachments (mapv (fn [a]
+                             {:id (str (or (u/jget a "id") ""))
+                              :filename (or (u/jget a "filename") (u/jget a "name"))
+                              :content_type (or (u/jget a "content_type") (u/jget a "contentType"))
+                              :size (u/jget a "size")
+                              :url (u/jget a "url")
+                              :proxy_url (or (u/jget a "proxy_url") (u/jget a "proxyURL"))
+                              :width (u/jget a "width")
+                              :height (u/jget a "height")})
+                           (u/js-values (u/jget message "attachments")))
+         embeds (mapv (fn [e]
+                        {:type (u/jget e "type")
+                         :title (u/jget e "title")
+                         :description (u/jget e "description")
+                         :url (u/jget e "url")
+                         :provider (u/jget e "provider" "name")})
+                      (u/js-values (u/jget message "embeds")))
+         mention-users (mention-user-records message)
+         mentions (->> (concat (ids (u/jget message "mentions"))
+                               (extract-user-mentions content))
+                       (remove str/blank?)
+                       distinct
+                       vec)
+         mention-channels (extract-channel-mentions content)
+         urls (->> (concat (extract-urls content)
+                           (keep :url attachments)
+                           (keep :url embeds))
+                   (remove str/blank?)
+                   distinct
+                   vec)
+         reply-ref (reply-reference message)
+         ts (message-timestamp message)
+         labels (cond-> []
+                  (contains? known-label-user-ids aid) (conj "moderation-watch:known-user" (str "moderation-watch:user:" aid)))]
+     (clj->js {:schema "openplanner.event.v1"
+               :schema_version 1
+               :id (str "discord:" guild-id ":" channel-id ":" message-id)
+               :ts ts
+               :source "betterdiscord-openplanner"
+               :kind "discord.message"
+               :source_ref {:project c/default-project
+                            :session guild-id
+                            :message message-id}
+               :text (or (not-empty content)
+                         (not-empty (str/join "\n" (keep :url attachments)))
+                         (not-empty (str/join "\n" (keep :url embeds)))
+                         "")
+               :meta {:author (or (u/jget author "username") (u/jget author "globalName") aid)
+                      :author_id aid
+                      :author_username (u/jget author "username")
+                      :author_global_name (u/jget author "globalName")
+                      :bot (boolean (u/jget author "bot"))
+                      :tags (cond-> ["discord" "message"]
+                              (contains? known-label-user-ids aid) (into ["known-watch-user" "moderation-watch"]))}
+               :extra (cond-> {:guild_id guild-id
+                               :channel_id channel-id
+                               :channel_name channel-name
+                               :message_id message-id
+                               :nonce (u/jget message "nonce")
+                               :type (u/jget message "type")
+                               :flags (u/jget message "flags")
+                               :pinned (boolean (u/jget message "pinned"))
+                               :tts (boolean (u/jget message "tts"))
+                               :mention_everyone (boolean (u/jget message "mention_everyone"))
+                               :mentions mentions
+                               :mention_users mention-users
+                               :mention_channels mention-channels
+                               :mention_roles (ids (u/jget message "mention_roles"))
+                               :urls urls
+                               :attachments attachments
+                               :embeds embeds
+                               :edited_timestamp (u/jget message "edited_timestamp")}
+                        (some? eff-guild-name) (assoc :guild_name eff-guild-name)
+                        (some? reply-ref) (assoc :reply_to reply-ref
+                                                 :reply_to_message_id (:message_id reply-ref))
+                        (some? (:author_id reply-ref)) (assoc :reply_to_author_id (:author_id reply-ref))
+                        (seq labels) (assoc :openplanner_labels {:claim_system "discord-moderation-watch-v1"
+                                                                 :labels (vec (distinct labels))
+                                                                 :updated_at (u/now-iso)})
+                        (contains? known-label-user-ids aid) (assoc :is_known_watch_user true))}))))
 
 (defn- graph-node-event
   "Builds a graph.node OpenPlanner event JS object."
@@ -252,8 +259,8 @@
                           extra)}))
 
 (defn message-graph-events
-  "Derives structured graph.node and graph.edge events (users, channels, mentions,
-  replies, web links) from a discord.message OpenPlanner event."
+  "Derives structured graph.node and graph.edge events (users, channels, servers/guilds,
+  mentions, replies, web links) from a discord.message OpenPlanner event."
   [event]
   (if (not= "discord.message" (u/jget event "kind"))
     []
@@ -261,6 +268,7 @@
           ts (str (or (u/jget event "ts") (u/now-iso)))
           project (str (or (u/jget event "source_ref" "project") c/default-project))
           guild-id (str (or (u/jget event "extra" "guild_id") (u/jget event "source_ref" "session") ""))
+          guild-name (str (or (u/jget event "extra" "guild_name") ""))
           channel-id (str (or (u/jget event "extra" "channel_id") ""))
           channel-name (str (or (u/jget event "extra" "channel_name") ""))
           aid (str (or (u/jget event "meta" "author_id") ""))
@@ -287,7 +295,8 @@
                                 vec)
           urls (->> (concat (map str (u/js-values (u/jget event "extra" "urls")))
                             (extract-urls text))
-                    (remove str/blank?)
+                    (remove #(or (str/blank? %)
+                                 (re-find #"(?i)^https?://(?:cdn\.discordapp\.com|media\.discordapp\.net)/" (str %))))
                     distinct
                     vec)
           reply-mid (str (or (u/jget event "extra" "reply_to_message_id")
@@ -299,7 +308,9 @@
           author-node-id (when (and (not (str/blank? aid)) (not= "unknown" aid))
                            (str "discord:user:" aid))
           channel-node-id (when-not (str/blank? channel-id)
-                            (str "discord:channel:" channel-id))]
+                            (str "discord:channel:" channel-id))
+          guild-node-id (when-not (str/blank? guild-id)
+                          (str "discord:guild:" guild-id))]
       (if (str/blank? ev-id)
         []
         (vec
@@ -314,10 +325,11 @@
                                            (when (and author-username (not= author-label author-username))
                                              (str " (@" author-username ")"))
                                            " [" aid "]")
-                                :extra {:user_id aid
-                                        :username author-username
-                                        :global_name author-global
-                                        :guild_id guild-id}})
+                                :extra (cond-> {:user_id aid
+                                                :username author-username
+                                                :global_name author-global
+                                                :guild_id guild-id}
+                                         (not (str/blank? guild-name)) (assoc :guild_name guild-name))})
              (graph-edge-event {:event-id (str ev-id ":authored_by:" author-node-id)
                                 :ts ts :project project :session guild-id
                                 :edge-type "authored_by" :layer "social"
@@ -330,13 +342,38 @@
                                   :ts ts :project project :session guild-id
                                   :node-id channel-node-id :node-kind "discord.channel"
                                   :label ch-label
-                                  :text (str "Discord channel " ch-label " [" channel-id "]")
-                                  :extra {:channel_id channel-id :channel_name channel-name :guild_id guild-id}})
+                                  :text (str "Discord channel " ch-label
+                                             (when-not (str/blank? guild-name) (str " in " guild-name))
+                                             " [" channel-id "]")
+                                  :extra (cond-> {:channel_id channel-id :channel_name channel-name :guild_id guild-id}
+                                           (not (str/blank? guild-name)) (assoc :guild_name guild-name))})
                (graph-edge-event {:event-id (str ev-id ":in_channel:" channel-node-id)
                                   :ts ts :project project :session guild-id
                                   :edge-type "in_channel" :layer "structural"
                                   :source-node-id ev-id :target-node-id channel-node-id
                                   :extra {:channel_id channel-id :channel_name channel-name :guild_id guild-id}})]))
+          ;; Server (guild) node + in_guild edge + channel_in_guild edge
+          (when guild-node-id
+            (let [g-label (if (str/blank? guild-name) (str "server:" guild-id) guild-name)
+                  g-extra (cond-> {:guild_id guild-id}
+                            (not (str/blank? guild-name)) (assoc :guild_name guild-name))]
+              (cond-> [(graph-node-event {:event-id (str "graph.node:" guild-node-id)
+                                          :ts ts :project project :session guild-id
+                                          :node-id guild-node-id :node-kind "discord.guild"
+                                          :label g-label
+                                          :text (str "Discord server " g-label " [" guild-id "]")
+                                          :extra g-extra})
+                       (graph-edge-event {:event-id (str ev-id ":in_guild:" guild-node-id)
+                                          :ts ts :project project :session guild-id
+                                          :edge-type "in_guild" :layer "structural"
+                                          :source-node-id ev-id :target-node-id guild-node-id
+                                          :extra g-extra})]
+                channel-node-id
+                (conj (graph-edge-event {:event-id (str channel-node-id ":channel_in_guild:" guild-node-id)
+                                         :ts ts :project project :session guild-id
+                                         :edge-type "channel_in_guild" :layer "structural"
+                                         :source-node-id channel-node-id :target-node-id guild-node-id
+                                         :extra (merge {:channel_id channel-id :channel_name channel-name} g-extra)})))))
           ;; Mentioned user nodes + mentions_user edges
           (mapcat (fn [uid]
                     (let [target-id (str "discord:user:" uid)

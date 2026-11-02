@@ -50,10 +50,66 @@
   [config session-id]
   (await (get-json! config (str "/api/memory/sessions/" (js/encodeURIComponent (str session-id))))))
 
+(def ^:private max-image-bytes
+  "Maximum byte size for a single fetched Discord image attachment (12 MiB)."
+  (* 12 1024 1024))
+
+(defn- ^:async materialize-image-part!
+  "Fetches a remote image part `{:type \"image\" :url ...}` into a base64 `data:` URL
+  with a 4.5s timeout. Returns nil if the URL is expired/unreachable or exceeds max-image-bytes
+  so an expired Discord CDN signature never aborts the whole Knoxx turn."
+  [part]
+  (cond
+    (not= "image" (str (:type part)))
+    part
+
+    (and (string? (:data part)) (.startsWith (str (:data part)) "data:"))
+    part
+
+    (string? (:url part))
+    (try
+      (let [signal (when (exists? js/AbortSignal.timeout)
+                     (js/AbortSignal.timeout 4500))
+            opts (if signal #js {:method "GET" :signal signal} #js {:method "GET"})
+            res (await (js/fetch (:url part) opts))]
+        (if-not (.-ok res)
+          (do (js/console.warn "[knoxx-lens] skipping unreachable image attachment" (:url part) (.-status res))
+              nil)
+          (let [ab (await (.arrayBuffer res))
+                buf (js/Buffer.from ab)
+                size (.-length buf)]
+            (if (or (zero? size) (> size max-image-bytes))
+              (do (js/console.warn "[knoxx-lens] skipping oversized/empty image attachment" (:url part) size)
+                  nil)
+              (let [header-mime (some-> res .-headers (.get "content-type") (.split ";") first .trim)
+                    mime (if (and header-mime (.startsWith header-mime "image/"))
+                           header-mime
+                           (or (:mimeType part) "image/png"))
+                    data-url (str "data:" mime ";base64," (.toString buf "base64"))]
+                (-> part
+                    (dissoc :url)
+                    (assoc :data data-url :mimeType mime)))))))
+      (catch :default err
+        (js/console.warn "[knoxx-lens] skipping failed image attachment" (:url part) (.-message err))
+        nil))
+
+    :else nil))
+
+(defn- ^:async materialize-content-parts!
+  "Materializes any `:contentParts` on a turn body in parallel, dropping failed fetches."
+  [body]
+  (let [parts (vec (or (:contentParts body) []))]
+    (if (empty? parts)
+      body
+      (let [resolved (await (js/Promise.all (clj->js (mapv materialize-image-part! parts))))]
+        (assoc body :contentParts (vec (remove nil? (array-seq resolved))))))))
+
 (defn ^:async start-direct-turn!
-  "Queues a direct (non-RAG) Knoxx turn. Resolves to post-json! result."
+  "Queues a direct (non-RAG) Knoxx turn after materializing any multimodal image parts.
+  Resolves to post-json! result."
   [config body]
-  (await (post-json! config "/api/knoxx/direct/start" body)))
+  (let [ready-body (await (materialize-content-parts! body))]
+    (await (post-json! config "/api/knoxx/direct/start" ready-body))))
 
 (defn ^:async abort-turn!
   "Requests Knoxx abort the running turn for conversation-id. Never rejects:

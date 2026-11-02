@@ -9,14 +9,26 @@
 (defn create-client
   "Creates and logs in a Discord client, returning a promise that resolves to the client."
   [token]
-  (let [^js client (new (.-Client discord)
-                        #js {:intents #js [(aget (.-GatewayIntentBits discord) "Guilds")]})]
+  (let [bits (.-GatewayIntentBits discord)
+        partials (.-Partials discord)
+        intents #js [(aget bits "Guilds")
+                     (aget bits "GuildMessages")
+                     (aget bits "DirectMessages")
+                     (aget bits "MessageContent")
+                     (aget bits "GuildMessageReactions")
+                     (aget bits "DirectMessageReactions")]
+        client-partials #js [(aget partials "Channel")
+                             (aget partials "Message")]
+        ^js client (new (.-Client discord)
+                        #js {:intents intents
+                             :partials client-partials})]
     (-> (.login client token)
         (.then (fn [_]
                  (js/console.log "[discord] Logged in as"
                                  (str (.-tag (.-user client)))
                                  (str "(" (.-id (.-user client)) ")"))
                  client)))))
+
 
 (defn send-message!
   "Sends content to channel-id as one or more chunks, returning a promise of sent messages."

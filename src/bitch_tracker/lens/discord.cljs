@@ -8,9 +8,11 @@
             [clojure.string :as str]))
 
 (defn load-stores
-  "Resolves the Discord stores KnoxxLens reads from."
+  "Resolves the Discord stores and action modules KnoxxLens interacts with."
   []
   {:dispatcher (bd/get-module (fn [m] (and (u/jget m "dispatch") (u/jget m "subscribe") (u/jget m "unsubscribe"))))
+   :component-dispatch (bd/get-module (fn [m] (and (u/jget m "dispatchToLastSubscribed") (u/jget m "emitter"))))
+   :message-actions (bd/get-module (fn [m] (and (u/jget m "sendMessage") (u/jget m "editMessage"))))
    :channel-store (bd/get-store "ChannelStore")
    :guild-store (bd/get-store "GuildStore")
    :message-store (bd/get-store "MessageStore")
@@ -54,9 +56,12 @@
 
 (defn message->context
   "Converts a Discord message into a context message via the shared OpenPlanner event builder."
-  [stores ^js message channel-id]
+  [{:keys [guild-store] :as stores} ^js message channel-id]
   (let [channel (raw-channel stores channel-id)
-        event (events/message-to-event message channel (guild-id-of channel) #{})]
+        guild-id (guild-id-of channel)
+        guild-name (when (seq guild-id)
+                     (some-> (u/jcall guild-store "getGuild" guild-id) (u/jget "name") str str/trim not-empty))
+        event (events/message-to-event message channel guild-id #{} guild-name)]
     (ctx/event->context-message (js->clj event :keywordize-keys true))))
 
 (defn loaded-messages
@@ -108,8 +113,62 @@
                        children (u/jget tree "props" "children")]
                    (when (and message item)
                      (try
-                       (if (array? children)
-                         (.push children item)
-                         (aset (u/jget tree "props") "children" #js [children item]))
-                       (catch :default err
-                         (bd/log! "warn" plugin-name "context menu patch failed" err))))))))))
+                        (if (array? children)
+                          (.push children item)
+                          (aset (u/jget tree "props") "children" #js [children item]))
+                        (catch :default err
+                          (bd/log! "warn" plugin-name "context menu patch failed" err))))))))))
+
+(defn insert-into-composer!
+  "Stages draft text into Discord's channel composer (via ComponentDispatch INSERT_TEXT
+  and Dispatcher DRAFT_SAVE) and copies it to the clipboard as backup."
+  [{:keys [dispatcher component-dispatch]} channel-id text]
+  (let [clean (str (or text ""))]
+    (when-let [clipboard (some-> (bd/global-get "navigator") .-clipboard)]
+      (.writeText clipboard clean))
+    (try
+      (when (and dispatcher (u/jget dispatcher "dispatch") (seq (str channel-id)))
+        (u/jcall dispatcher "dispatch"
+                 #js {:type "DRAFT_SAVE"
+                      :channelId (str channel-id)
+                      :draft clean
+                      :draftType 0}))
+      (catch :default _ nil))
+    (try
+      (when (and component-dispatch (u/jget component-dispatch "dispatchToLastSubscribed"))
+        (u/jcall component-dispatch "dispatchToLastSubscribed"
+                 "INSERT_TEXT"
+                 #js {:plainText clean :rawText clean}))
+      (catch :default _ nil))
+    {:ok true :mode :inserted}))
+
+(defn send-approved-message!
+  "Sends a human-approved draft message to channel-id using Discord's MessageActions
+  module (on behalf of the logged-in operator after explicit approval), falling back
+  to staging in the composer if MessageActions is unavailable."
+  [{:keys [message-actions] :as stores} channel-id text]
+  (let [clean (str/trim (str (or text "")))]
+    (cond
+      (str/blank? clean)
+      {:ok false :error "Draft text is empty"}
+
+      (str/blank? (str channel-id))
+      {:ok false :error "No target channel selected"}
+
+      (and message-actions (u/jget message-actions "sendMessage"))
+      (try
+        (u/jcall message-actions "sendMessage"
+                 (str channel-id)
+                 #js {:content clean
+                      :tts false
+                      :invalidEmojis #js []
+                      :validNonShortcutEmojis #js []})
+        {:ok true :mode :sent}
+        (catch :default err
+          (insert-into-composer! stores channel-id clean)
+          {:ok true :mode :staged :warning (str (.-message err))}))
+
+      :else
+      (do
+        (insert-into-composer! stores channel-id clean)
+        {:ok true :mode :staged}))))

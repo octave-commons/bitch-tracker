@@ -201,3 +201,30 @@
       (socket/handle-incoming-event! socket-state event)
       (socket/handle-incoming-event! socket-state event)
       (t/is (= 1 (.-length (.-queue op-state)))))))
+
+;; Tests that message-graph-events derives user, channel, server (guild), and web URL nodes and edges.
+(t/deftest message-graph-events-emits-user-channel-guild-and-url-edges
+  (t/testing "derives discord.guild, in_guild, channel_in_guild, authored_by, in_channel, and mentions_web_url"
+    (let [message #js {:id "m42"
+                       :channel_id "c-arch"
+                       :guild_id "g-openhax"
+                       :content "Check https://example.com/spec for the graph schema"
+                       :timestamp "2026-10-30T14:00:00.000Z"
+                       :author #js {:id "u-err" :username "error0815" :globalName "Erorrnussy" :bot false}
+                       :attachments #js []
+                       :embeds #js []
+                       :mentions #js []
+                       :mention_roles #js []}
+          channel #js {:id "c-arch" :name "architecture"}
+          ev (events/message-to-event message channel "g-openhax" #{} "OpenHax")
+          derived (mapv #(js->clj % :keywordize-keys true) (events/message-graph-events ev))
+          nodes (filter #(= "graph.node" (:kind %)) derived)
+          edges (filter #(= "graph.edge" (:kind %)) derived)
+          node-types (set (map #(get-in % [:extra :node_type]) nodes))
+          edge-types (set (map #(get-in % [:extra :edge_type]) edges))
+          guild-node (first (filter #(= "discord.guild" (get-in % [:extra :node_type])) nodes))]
+      (t/is (= "OpenHax" (aget ev "extra" "guild_name")))
+      (t/is (every? #(contains? node-types %) ["discord.user" "discord.channel" "discord.guild" "web.url"]))
+      (t/is (every? #(contains? edge-types %) ["authored_by" "in_channel" "in_guild" "channel_in_guild" "mentions_web_url"]))
+      (t/is (= "discord:guild:g-openhax" (get-in guild-node [:extra :node_id])))
+      (t/is (= "OpenHax" (get-in guild-node [:extra :label]))))))

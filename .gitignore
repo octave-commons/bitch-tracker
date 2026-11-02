@@ -8,3 +8,7 @@
 /node_modules/
 *.log
 /.config
+.env
+.env.*
+.error/
+dedup-cache.json

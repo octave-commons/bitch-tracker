@@ -5,7 +5,8 @@
             ["http" :as http]
             [bitch-tracker.bot.lens :as lens]
             [bitch-tracker.shape.protocol :as proto]
-            [cljs.test :as t]))
+            [cljs.test :as t]
+            [clojure.string :as str]))
 
 (def ^:private ws-guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
 
@@ -124,9 +125,44 @@
         (t/is (= "gemma4:e4b" (:model body) (get-in body [:agentSpec :model])))
         (t/is (= "conv-1" (:conversationId body)))
         (t/is (= ["discord:g1:c1:m1"] (get-in body [:templateContext :discord :openplanner_event_ids])))
-        (t/is (= [{:type "text" :text "<discord_context>…</discord_context>"}] (:contentParts body)))
+        (t/is (= [] (:contentParts body)))
         (t/is (empty? @runs) "the run is forgotten after completion"))
       (finally
         (doseq [{:keys [^js sock]} @clients] (.destroy sock))
         (.closeAllConnections server)
         (.close server)))))
+
+;; Tests the real neural NER (`Xenova/bert-base-NER`) + Penn Treebank POS (`wink-pos-tagger`)
+;; broker handler end-to-end on noisy Discord messages.
+(t/deftest ^:async broker-extracts-ner-and-pos-topics-from-real-models
+  (let [emitted (atom [])
+        socket #js {:id "sock-topics"
+                    :emit (fn [event-name data]
+                            (swap! emitted conj [event-name (js->clj data :keywordize-keys true)]))}
+        payload #js {:channelId "c-ner-1"
+                     :fingerprint "3:m1:m3"
+                     :maxTopics 10
+                     :messages #js [#js {:author "Alice"
+                                         :text "We found facinating work using OpenPlanner via BetterDiscord!"
+                                         :ts "2026-10-30T12:00:00.000Z"}
+                                    #js {:author "Bob"
+                                         :text "Its still free to use when streaming KnoxxLens over the WebSocket broker."
+                                         :ts "2026-10-30T12:01:00.000Z"}
+                                    #js {:author "Alice"
+                                         :text "OpenPlanner and KnoxxLens index BetterDiscord channels through the WebSocket broker."
+                                         :ts "2026-10-30T12:02:00.000Z"}]}]
+    (await (lens/handle-topics-extract! socket payload))
+    (let [[event-name res] (first @emitted)
+          terms (mapv :term (:topics res))
+          lowers (set (map str/lower-case terms))]
+      (t/is (= proto/lens-topics-extract-to-plugin event-name))
+      (t/is (true? (:ok res)))
+      (t/is (= "c-ner-1" (:channelId res)))
+      (t/is (= "3:m1:m3" (:fingerprint res)))
+      (t/is (= "Xenova/bert-base-NER+wink-pos-tagger" (:engine res))
+            "uses both the neural BERT NER model and the Penn Treebank POS tagger")
+      (t/is (some #{"openplanner" "betterdiscord" "knoxxlens"} lowers)
+            "extracts real proper nouns/entities from channel messages")
+      (doseq [noise ["found" "work" "using" "via" "facinating" "fascinating" "free" "its" "still" "use"]]
+        (t/is (not (contains? lowers noise))
+              (str "real NER+POS broker excludes reported noise word: " noise))))))

@@ -93,3 +93,68 @@
 (def ^:const lens-session-get-to-plugin
   "Wire name for full turns of a past KnoxxLens session delivered to the plugin."
   "bot:lens:session")
+
+(def ^:const lens-graph-query-to-bot
+  "Wire name for requesting a knowledge-graph neighborhood query from the bot."
+  "lens:graph:query")
+
+(def ^:const lens-graph-query-to-plugin
+  "Wire name for a knowledge-graph neighborhood response delivered to the plugin."
+  "bot:lens:graph")
+
+(def ^:const lens-topics-extract-to-bot
+  "Wire name for requesting NER + POS noun/proper-noun topic extraction from the bot."
+  "lens:topics:extract")
+
+(def ^:const lens-topics-extract-to-plugin
+  "Wire name for extracted NER + POS channel topics delivered to the plugin."
+  "bot:lens:topics")
+
+(def ^:const lens-connections-to-bot
+  "Wire name for requesting WebGL connections graph from the bot."
+  "lens:connections:get")
+
+(def ^:const lens-connections-to-plugin
+  "Wire name for WebGL connections graph delivered to the plugin."
+  "bot:lens:connections")
+
+(def ^:const lens-govone-extract-to-bot
+  "Wire name for GovOne de-identification and extraction from the bot."
+  "lens:govone:extract")
+
+(def ^:const lens-govone-extract-to-plugin
+  "Wire name for GovOne de-identification response delivered to the plugin."
+  "bot:lens:govone:extract")
+
+(def ^:const lens-govone-channel-read-to-bot
+  "Wire name for reading governed channel messages via GovOne."
+  "lens:govone:channel:read")
+
+(def ^:const lens-govone-channel-read-to-plugin
+  "Wire name for governed channel messages delivered to the plugin."
+  "bot:lens:govone:channel:read")
+
+(def ^:const lens-govone-channel-send-to-bot
+  "Wire name for sending a message over the governed channel via GovOne."
+  "lens:govone:channel:send")
+
+(def ^:const lens-govone-channel-send-to-plugin
+  "Wire name for governed channel send response delivered to the plugin."
+  "bot:lens:govone:channel:send")
+
+(def ^:const lens-desktop-list-to-bot
+  "Wire name for requesting active desktop windows from the bot."
+  "lens:desktop:list")
+
+(def ^:const lens-desktop-list-to-plugin
+  "Wire name for active desktop windows delivered to the plugin."
+  "bot:lens:desktop:list")
+
+(def ^:const lens-desktop-focus-to-bot
+  "Wire name for requesting i3 window focus from the bot."
+  "lens:desktop:focus")
+
+(def ^:const lens-desktop-focus-to-plugin
+  "Wire name for i3 window focus response delivered to the plugin."
+  "bot:lens:desktop:focus")
+

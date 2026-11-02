@@ -163,4 +163,9 @@
      :knoxx-api-key              (env-or "KNOXX_API_KEY" "")
      :lens-model                 (env-or "KNOXX_LENS_MODEL" c/default-lens-model)
      :lens-local-models          (parse-id-set (env-or "KNOXX_LENS_LOCAL_MODELS" c/default-lens-local-models))
-     :lens-turn-timeout-ms       (parse-int-env "KNOXX_LENS_TURN_TIMEOUT_MS" c/lens-turn-timeout-ms)}))
+     :lens-turn-timeout-ms       (parse-int-env "KNOXX_LENS_TURN_TIMEOUT_MS" c/lens-turn-timeout-ms)
+     :govone-base-url            (str/replace (env-or "GOVONE_HOST_URL" (env-or "GOVONE_BASE_URL" "http://127.0.0.1:18080")) #"/+$" "")
+     :govone-lens-token          (env-or "GOVONE_LENS_TOKEN" "")
+     :govone-channel-session-id  (env-or "GOVONE_CHANNEL_SESSION_ID" "01a199ca-34b4-792f-a2a8-aa0b632e94bd")
+     :ocr-npu-url                (str/replace (env-or "OCR_NPU_URL" "http://127.0.0.1:8099") #"/+$" "")}))
+

@@ -11,57 +11,103 @@
     {:url trimmed
      :suffix (subs (str url) (count trimmed))}))
 
+(defn- balance-streaming-inline
+  "Balances trailing unclosed inline `code`, `***`, `**`, or `__` markers on a
+   single line so active token streaming renders progressive bold/code cleanly
+   without breaking surrounding text."
+  [line]
+  (let [s (str (or line ""))
+        tick-count (count (re-seq #"`" s))
+        s-ticks (if (odd? tick-count)
+                  (let [last-idx (str/last-index-of s "`")
+                        tail (subs s (inc last-idx))]
+                    (if (seq (str/trim tail)) (str s "`") s))
+                  s)
+        outside-code (str/replace s-ticks #"`[^`\n]*`" "")]
+    (cond
+      (odd? (count (re-seq #"\*\*\*" outside-code)))
+      (let [last-idx (str/last-index-of s-ticks "***")
+            tail (when last-idx (subs s-ticks (+ last-idx 3)))]
+        (if (and tail (boolean (re-find #"^\S" tail)))
+          (str s-ticks "***")
+          s-ticks))
+
+      (odd? (count (re-seq #"\*\*" outside-code)))
+      (let [last-idx (str/last-index-of s-ticks "**")
+            tail (when last-idx (subs s-ticks (+ last-idx 2)))]
+        (if (and tail (boolean (re-find #"^\S" tail)))
+          (str s-ticks "**")
+          s-ticks))
+
+      (odd? (count (re-seq #"__" outside-code)))
+      (let [last-idx (str/last-index-of s-ticks "__")
+            tail (when last-idx (subs s-ticks (+ last-idx 2)))]
+        (if (and tail (boolean (re-find #"^\S" tail)))
+          (str s-ticks "__")
+          s-ticks))
+
+      :else
+      s-ticks)))
+
+(defn- parse-balanced-inline
+  [s]
+  (if (str/blank? s)
+    (if (empty? s) [] [{:type :text :text s}])
+    (loop [remaining s
+           acc []]
+      (if (empty? remaining)
+        acc
+        (if-let [m (re-find inline-token-re remaining)]
+          (let [token (first m)
+                idx (str/index-of remaining token)
+                before (subs remaining 0 idx)
+                after (subs remaining (+ idx (count token)))
+                acc' (cond-> acc
+                       (pos? (count before)) (conj {:type :text :text before}))
+                node (cond
+                       (and (str/starts-with? token "`") (str/ends-with? token "`"))
+                       {:type :code :text (subs token 1 (dec (count token)))}
+
+                       (and (str/starts-with? token "***") (str/ends-with? token "***"))
+                       {:type :bold-italic :children (parse-balanced-inline (subs token 3 (- (count token) 3)))}
+
+                       (or (and (str/starts-with? token "**") (str/ends-with? token "**"))
+                           (and (str/starts-with? token "__") (str/ends-with? token "__")))
+                       {:type :bold :children (parse-balanced-inline (subs token 2 (- (count token) 2)))}
+
+                       (and (str/starts-with? token "~~") (str/ends-with? token "~~"))
+                       {:type :strike :children (parse-balanced-inline (subs token 2 (- (count token) 2)))}
+
+                       (and (str/starts-with? token "*") (str/ends-with? token "*"))
+                       {:type :italic :children (parse-balanced-inline (subs token 1 (dec (count token))))}
+
+                       (str/starts-with? token "[")
+                       (let [[_ label href] (re-matches #"\[([^\]\n]+)\]\((https?://[^\s)]+)\)" token)]
+                         {:type :link :label label :href href})
+
+                       :else
+                       (let [{:keys [url suffix]} (clean-trailing-url-punct token)]
+                         (if (seq suffix)
+                           [:multi
+                            {:type :link :label url :href url}
+                            {:type :text :text suffix}]
+                           {:type :link :label url :href url})))]
+            (recur after
+                   (if (and (vector? node) (= :multi (first node)))
+                     (into acc' (rest node))
+                     (conj acc' node))))
+          (conj acc {:type :text :text remaining}))))))
+
 (defn parse-inline
   "Parses inline Markdown formatting (code, bold, italic, strikethrough, links)
-  into a vector of AST maps."
+  into a vector of AST maps, balancing unclosed streaming delimiters per line."
   [text]
   (let [s (str (or text ""))]
     (if (str/blank? s)
       (if (empty? s) [] [{:type :text :text s}])
-      (loop [remaining s
-             acc []]
-        (if (empty? remaining)
-          acc
-          (if-let [m (re-find inline-token-re remaining)]
-            (let [token (first m)
-                  idx (str/index-of remaining token)
-                  before (subs remaining 0 idx)
-                  after (subs remaining (+ idx (count token)))
-                  acc' (cond-> acc
-                         (pos? (count before)) (conj {:type :text :text before}))
-                  node (cond
-                         (and (str/starts-with? token "`") (str/ends-with? token "`"))
-                         {:type :code :text (subs token 1 (dec (count token)))}
-
-                         (and (str/starts-with? token "***") (str/ends-with? token "***"))
-                         {:type :bold-italic :children (parse-inline (subs token 3 (- (count token) 3)))}
-
-                         (or (and (str/starts-with? token "**") (str/ends-with? token "**"))
-                             (and (str/starts-with? token "__") (str/ends-with? token "__")))
-                         {:type :bold :children (parse-inline (subs token 2 (- (count token) 2)))}
-
-                         (and (str/starts-with? token "~~") (str/ends-with? token "~~"))
-                         {:type :strike :children (parse-inline (subs token 2 (- (count token) 2)))}
-
-                         (and (str/starts-with? token "*") (str/ends-with? token "*"))
-                         {:type :italic :children (parse-inline (subs token 1 (dec (count token))))}
-
-                         (str/starts-with? token "[")
-                         (let [[_ label href] (re-matches #"\[([^\]\n]+)\]\((https?://[^\s)]+)\)" token)]
-                           {:type :link :label label :href href})
-
-                         :else
-                         (let [{:keys [url suffix]} (clean-trailing-url-punct token)]
-                           (if (seq suffix)
-                             [:multi
-                              {:type :link :label url :href url}
-                              {:type :text :text suffix}]
-                             {:type :link :label url :href url})))]
-              (recur after
-                     (if (and (vector? node) (= :multi (first node)))
-                       (into acc' (rest node))
-                       (conj acc' node))))
-            (conj acc {:type :text :text remaining})))))))
+      (let [lines (str/split s #"\n" -1)
+            balanced (str/join "\n" (map balance-streaming-inline lines))]
+        (parse-balanced-inline balanced)))))
 
 (defn- heading-line [line]
   (when-let [[_ hashes body] (re-matches #"^\s*(#{1,6})\s*(.+?)\s*$" line)]
@@ -108,12 +154,35 @@
   (let [trimmed (-> line str/trim (str/replace #"^\|" "") (str/replace #"\|$" ""))]
     (mapv (comp parse-inline str/trim) (str/split trimmed #"\|"))))
 
+(defn- split-glued-heading-line
+  "Prevents a missing newline after `#` from turning an entire multi-sentence
+   streamed paragraph into one giant bold heading."
+  [line]
+  (if (and (re-matches #"^\s*#{1,6}\s*.+$" line) (> (count line) 88))
+    (cond
+      (re-matches #"^\s*#{1,6}\s*[^\n]{0,40}?TL;DR[:\s-]*.+$" line)
+      (str/replace line #"^(\s*#{1,6}\s*[^\n]{0,40}?TL;DR[:\s-]*)(.+)$" "$1\n$2")
+
+      (re-matches #"^\s*#{1,6}\s*[^.!?\n]{3,80}[.!?]\s+.+$" line)
+      (str/replace line #"^(\s*#{1,6}\s*[^.!?\n]{3,80}[.!?])\s+(.+)$" "$1\n$2")
+
+      (re-matches #"^\s*#{1,6}\s*[^\n]{4,64}?[a-z0-9][A-Z][a-z].{20,}$" line)
+      (str/replace line #"^(\s*#{1,6}\s*[^\n]{4,64}?[a-z0-9])([A-Z][a-z].{20,})$" "$1\n$2")
+
+      :else
+      line)
+    line))
+
 (defn- normalize-inline-headings
-  "Splits mid-line '### Heading' or '---' markers emitted when a model omits newlines."
+  "Splits mid-line '### Heading' markers or glued overlong heading lines emitted
+   when a provider omits newlines during streaming."
   [text]
-  (-> (str (or text ""))
-      (str/replace #"\r\n?" "\n")
-      (str/replace #"([^\n#])(#{2,6}\s*[^\n#])" "$1\n\n$2")))
+  (let [with-splits (-> (str (or text ""))
+                        (str/replace #"\r\n?" "\n")
+                        (str/replace #"([^\n#])\s*(#{2,6}(?:\s+|[^\s#\n]))" "$1\n\n$2"))]
+    (->> (str/split with-splits #"\n" -1)
+         (map split-glued-heading-line)
+         (str/join "\n"))))
 
 (defn- consume-code-block [lines i n {:keys [fence lang]}]
   (loop [j (inc i)
